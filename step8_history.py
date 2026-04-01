@@ -1,0 +1,45 @@
+import os
+import csv
+import anthropic
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
+client = anthropic.Anthropic()
+
+SIGNALS_FILE = "signals.csv"
+
+def load_history(n=10):
+    if not os.path.exists(SIGNALS_FILE):
+        return []
+    try:
+        with open(SIGNALS_FILE, "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        return rows[-n:] if len(rows) >= n else rows
+    except Exception as e:
+        print(f"[WARN] Could not load history: {e}")
+        return []
+
+def summarize_history(history):
+    if not history:
+        return {"success": True, "data": "No signal history yet — this is the first signal."}
+    try:
+        history_text = "\n".join(
+            f"[{r.get('timestamp','')}] {r.get('signal','')} -> {r.get('outcome','pending')} "
+            f"(confidence: {r.get('confidence','')}%)"
+            for r in history
+        )
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=100,
+            system="""You are a trading pattern analyst.
+Summarize the win/loss pattern from recent signals in ONE sentence.
+Focus on what conditions led to wins vs losses.
+Output plain text only. Maximum 30 words.""",
+            messages=[{"role": "user", "content": f"Recent signal history:\n{history_text}"}]
+        )
+        return {"success": True, "data": response.content[0].text.strip()}
+    except Exception as e:
+        print(f"[WARN] History summarization failed: {e}")
+        return {"success": True, "data": "Could not summarize history."}
