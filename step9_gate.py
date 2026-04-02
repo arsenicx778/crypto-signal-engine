@@ -3,7 +3,7 @@ import csv
 from datetime import date
 
 SIGNALS_FILE     = "signals.csv"
-MAX_DAILY_CALLS  = 200
+MAX_DAILY_CALLS  = 300
 CAPITAL          = 1000.0
 RISK_PCT         = 0.02
 

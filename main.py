@@ -96,8 +96,8 @@ if __name__ == "__main__":
     run_cycle()
 
     scheduler = BlockingScheduler()
-    scheduler.add_job(run_cycle, "interval", minutes=1)
-    print("Scheduler started — running every 1 minute. Press Ctrl+C to stop.")
+    scheduler.add_job(run_cycle, "interval", minutes=5)
+    print("Scheduler started — running every 5 minutes. Press Ctrl+C to stop.")
     try:
         scheduler.start()
     except KeyboardInterrupt:
