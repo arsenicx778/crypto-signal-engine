@@ -14,7 +14,7 @@ def score_sentiment(headlines):
             model="claude-haiku-4-5-20251001",
             max_tokens=150,
             system="""You are a crypto news sentiment scorer.
-Score the overall sentiment of these Bitcoin headlines.
+Score the overall sentiment of these Ethereum headlines.
 Output ONLY valid JSON with no other text:
 {
   "news_score": 0.0,
@@ -23,7 +23,7 @@ Output ONLY valid JSON with no other text:
 news_score must be a float between -1.0 (very bearish) and +1.0 (very bullish).""",
             messages=[{
                 "role": "user",
-                "content": f"Score these Bitcoin headlines:\n{headlines_text}"
+                "content": f"Score these Ethereum headlines:\n{headlines_text}"
             }]
         )
         raw = response.content[0].text.strip()

@@ -8,8 +8,8 @@ client = anthropic.Anthropic()
 
 CANDIDATE_INDICATORS = [
     "rsi", "ema_20", "ema_50", "macd", "macd_signal",
-    "macd_hist", "bb_upper", "bb_lower", "bb_mid",
-    "atr", "vwap", "adx", "obv"
+    "macd_hist", "bb_upper", "bb_lower", "bb_mid", "bb_width",
+    "atr", "vwap", "adx", "di_plus", "di_minus", "obv"
 ]
 
 def select_indicators(all_indicators):
@@ -20,7 +20,7 @@ def select_indicators(all_indicators):
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
-            system="""You are a technical indicator selector for Bitcoin trading.
+            system="""You are a technical indicator selector for Ethereum trading.
 Given all computed indicator values, select between 1 and 5 indicators
 that are most relevant for generating a trading signal right now.
 Avoid selecting redundant indicators that measure the same thing.
@@ -32,7 +32,7 @@ Output ONLY valid JSON in this exact format with no other text:
 }""",
             messages=[{
                 "role": "user",
-                "content": f"Current Bitcoin indicator values:\n{indicators_text}\n\nSelect the most relevant indicators."
+                "content": f"Current Ethereum indicator values:\n{indicators_text}\n\nSelect the most relevant indicators."
             }]
         )
         raw = response.content[0].text.strip()

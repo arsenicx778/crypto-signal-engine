@@ -1,23 +1,33 @@
 import json
-import csv
-import os
 import anthropic
-from datetime import datetime
+import requests
 from dotenv import load_dotenv
+from signal_store import append_signal_row, read_latest_signals
+from time_utils import now_pacific_clock
 
 load_dotenv()
 client = anthropic.Anthropic()
 
-SIGNALS_FILE = "signals.csv"
 MAX_ADJUSTMENTS = 2
+EXTREME_SENTIMENT_SCORE = 0.75
+MIN_HEADLINES_FOR_TP_ADJUST = 3
+
+
+def get_current_price():
+    try:
+        r = requests.get(
+            "https://api.kraken.com/0/public/Ticker",
+            params={"pair": "ETHUSD"},
+            timeout=5,
+        )
+        data = r.json()
+        return float(list(data["result"].values())[0]["c"][0])
+    except Exception:
+        return None
 
 def get_open_trade():
-    if not os.path.exists(SIGNALS_FILE):
-        return None
     try:
-        with open(SIGNALS_FILE, "r") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+        rows = read_latest_signals()
         open_trades = [
             r for r in rows
             if r.get("signal") == "Buy" and r.get("outcome", "pending") == "pending"
@@ -36,9 +46,27 @@ def check_tp_adjustment(trade, sentiment):
 
         news_score    = sentiment.get("news_score", 0.0)
         headline_count = sentiment.get("headline_count", 0)
+        entry_price = float(trade.get("entry_price", 0) or 0)
+        current_price = get_current_price()
 
-        if headline_count == 0:
-            print("[TP] No headlines available — skipping TP adjustment check")
+        if not entry_price or current_price is None:
+            print("[TP] Current price unavailable — skipping TP adjustment check")
+            return None
+
+        if current_price <= entry_price:
+            print(
+                f"[TP] Trade not in profit yet — current ${current_price:,.2f} vs entry ${entry_price:,.2f}"
+            )
+            return None
+
+        if headline_count < MIN_HEADLINES_FOR_TP_ADJUST:
+            print(f"[TP] Not enough headlines ({headline_count}) — skipping TP adjustment check")
+            return None
+
+        if news_score < EXTREME_SENTIMENT_SCORE:
+            print(
+                f"[TP] Sentiment not extreme enough ({news_score:.2f} < {EXTREME_SENTIMENT_SCORE:.2f})"
+            )
             return None
 
         response = client.messages.create(
@@ -46,11 +74,12 @@ def check_tp_adjustment(trade, sentiment):
             max_tokens=300,
             system="""You are a day trading take profit adjustment engine.
 
-You are evaluating whether current news sentiment is strong enough
-to justify moving the take profit higher on an open Bitcoin trade.
+You are evaluating whether current news sentiment is extremely strong enough
+to justify moving the take profit higher on an open Ethereum trade.
 
 This is a DAY TRADING strategy — small frequent wins are the goal.
-Be conservative. Only recommend adjustment on genuinely strong sentiment.
+Be conservative. Only recommend adjustment on genuinely extreme sentiment
+while the open trade is already in profit.
 Adjustments count toward a maximum of 2 per trade.
 
 Output ONLY valid JSON with no other text:
@@ -65,6 +94,7 @@ If adjust is false, new_take_profit must be null.""",
                 "role": "user",
                 "content": f"""Open trade details:
 Entry price:    ${float(trade.get('entry_price', 0)):,.2f}
+Current price:  ${current_price:,.2f}
 Current TP:     ${float(trade.get('take_profit', 0)):,.2f}
 Current SL:     ${float(trade.get('stop_loss', 0)):,.2f}
 Adjustments so far: {adjustments_so_far} of {MAX_ADJUSTMENTS} max
@@ -74,7 +104,7 @@ News score:     {news_score} (range -1.0 to +1.0)
 Headlines:      {headline_count}
 
 Should the take profit be adjusted upward based on this sentiment?
-Only recommend adjustment if sentiment is genuinely strong.
+Only recommend adjustment if sentiment is genuinely extreme and the trade is already winning.
 If adjusting, set new TP conservatively — this is day trading, not investing."""
             }]
         )
@@ -107,34 +137,17 @@ If adjusting, set new TP conservatively — this is day trading, not investing."
         return None
 
 def apply_tp_adjustment(trade_timestamp, new_tp, adjustments_used, reason):
-    rows = []
-    updated = False
-
-    with open(SIGNALS_FILE, "r") as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
-        for row in reader:
-            if row["timestamp"] == trade_timestamp:
-                row["take_profit"]      = new_tp
-                row["tp_adjustments"]   = adjustments_used
-                log = row.get("tp_adjustment_log", "") or ""
-                timestamp = datetime.utcnow().strftime("%H:%M:%S")
-                row["tp_adjustment_log"] = f"{log} | [{timestamp}] TP→${new_tp:,.2f}: {reason}".strip(" |")
-                updated = True
-            rows.append(row)
-
-    # Add new columns if not present
-    for col in ["tp_adjustments", "tp_adjustment_log"]:
-        if col not in fieldnames:
-            fieldnames.append(col)
-
-    with open(SIGNALS_FILE, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    if updated:
-        print(f"[TP] signals.csv updated — adjustment {adjustments_used}/{MAX_ADJUSTMENTS} applied")
+    for row in reversed(read_latest_signals()):
+        if row["timestamp"] != trade_timestamp:
+            continue
+        row["take_profit"] = new_tp
+        row["tp_adjustments"] = adjustments_used
+        log = row.get("tp_adjustment_log", "") or ""
+        timestamp = now_pacific_clock()
+        row["tp_adjustment_log"] = f"{log} | [{timestamp}] TP->${new_tp:,.2f}: {reason}".strip(" |")
+        append_signal_row(row)
+        print(f"[TP] signals.csv appended — adjustment {adjustments_used}/{MAX_ADJUSTMENTS} applied")
+        break
 
 def run_tp_adjustment(sentiment):
     trade = get_open_trade()

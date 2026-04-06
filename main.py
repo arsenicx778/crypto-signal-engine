@@ -10,12 +10,22 @@ from step8_history import load_history, summarize_history
 from step9_gate import pre_signal_gate
 from step10_brain import generate_signal
 from step11_guardrails import apply_guardrails
-from step12_output import save_signal, monitor_price
+from step12_output import save_signal, monitor_price, resume_open_trade_monitor
 from step_tp_adjust import run_tp_adjustment
-from datetime import datetime
+from time_utils import now_pacific_str
+
+SCHEDULER = None
+
+
+def stop_engine(reason):
+    global SCHEDULER
+    print(f"[STOP] {reason}")
+    if SCHEDULER and SCHEDULER.running:
+        SCHEDULER.shutdown(wait=False)
+
 
 def run_cycle():
-    print(f"\n[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] Starting cycle...")
+    print(f"\n[{now_pacific_str()}] Starting cycle...")
 
     # STEP 1 — Fetch
     candles_result = fetch_candles()
@@ -25,13 +35,13 @@ def run_cycle():
     validation = validate_data(candles_result, news_result)
     if not validation["valid"]:
         print(f"[SKIP] Validation failed: {validation['errors']}")
-        return
+        return True
 
     # STEP 3 — Compute all indicators
     compute_result = compute_indicators(candles_result["data"])
     if not compute_result["success"]:
         print(f"[SKIP] Compute failed: {compute_result['error']}")
-        return
+        return True
 
     # STEP 4 — Merge
     merged = merge_indicators(compute_result)
@@ -59,7 +69,7 @@ def run_cycle():
 
     if not gate["proceed"]:
         print(f"[SKIP] Gate blocked: {gate['reason']}")
-        return
+        return True
 
     capital     = gate.get("capital", 1000.0)
     risk_amount = gate.get("risk_amount", 20.0)
@@ -72,6 +82,9 @@ def run_cycle():
         capital,
         risk_amount
     )
+    if not signal_result["success"]:
+        stop_engine(f"Brain failed: {signal_result['error']}")
+        return False
 
     # STEP 11 — Guardrails
     guarded = apply_guardrails(signal_result)
@@ -88,14 +101,19 @@ def run_cycle():
         )
 
     print("[DONE] Cycle complete.")
+    return True
 
 if __name__ == "__main__":
     print("Starting AI Crypto Day Trading Signal Engine...")
-    print("Strategy: small frequent wins | 2% risk per trade | 2:1 reward:risk")
+    print("Strategy: small frequent wins | 2% risk per trade | 1:1 reward:risk")
     print("─" * 55)
-    run_cycle()
+    resume_open_trade_monitor()
+    if not run_cycle():
+        print("Engine stopped.")
+        raise SystemExit(1)
 
     scheduler = BlockingScheduler()
+    SCHEDULER = scheduler
     scheduler.add_job(run_cycle, "interval", minutes=5)
     print("Scheduler started — running every 5 minutes. Press Ctrl+C to stop.")
     try:

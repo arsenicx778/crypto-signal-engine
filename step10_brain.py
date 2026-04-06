@@ -12,22 +12,34 @@ def generate_signal(filtered_indicators, sentiment, history_summary, capital, ri
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=800,
-            system="""You are a disciplined Bitcoin DAY TRADING signal engine.
+            system="""You are an aggressive Ethereum DAY TRADING signal engine.
 
 STRATEGY:
 - Target small frequent wins that accumulate into consistent daily profit
-- Each trade targets 0.5% to 1.5% price moves — NOT large swings
+- Each trade targets 0.5% to 2% price moves — capture momentum moves decisively
 - Tight stop losses to protect capital — risk only what is specified
-- High probability setups only — wait for clear confluence
-- One trade at a time — quality over quantity
+- Take profit = 1.5x the stop loss distance (1.5:1 reward:risk minimum)
+- Be aggressive on confluence signals — do not wait for perfection
+- 60% confidence is acceptable for entry when indicators align clearly
 
 RULES:
-- If confidence is below 70% output Do Not Enter regardless of other factors
-- Stop loss and take profit MUST reflect day trading targets (0.5-1.5% moves)
+- If confidence is below 60% output Do Not Enter regardless of other factors
+- Stop loss and take profit MUST reflect day trading targets (0.5-2% moves)
+- Take profit must always be at least 1.5x the stop loss distance
 - Stop loss must never exceed the risk amount provided
 - Cite specific indicator values in your reasoning
 - Never hedge — commit to a clear decision
 - Think like a day trader: small wins compound into big gains
+- When RSI is below 35 (oversold), only enter Buy if sentiment score is above +0.4. Oversold RSI without sentiment confirmation is a falling knife not a bounce setup.
+- DI+ above DI- confirms uptrend. DI- above DI+ confirms downtrend. Never enter a Buy signal when DI- is greater than DI+ regardless of what other indicators show.
+
+INDICATOR GUIDANCE:
+- ADX measures trend STRENGTH only — it is non-directional. Do NOT use ADX alone as bullish confirmation.
+- Use DI+ vs DI- for directional bias when ADX is selected; DI+ > DI- = bullish trend, DI- > DI+ = bearish
+- BB_WIDTH measures Bollinger Band squeeze/expansion: BB_WIDTH > 0.02 indicates meaningful price movement is occurring
+- BB_WIDTH expanding = volatility increasing, good for momentum entries
+- BB_WIDTH < 0.015 = squeeze / low volatility = avoid or wait for breakout
+- Prefer BB_WIDTH over ADX for trend confirmation when trend direction is unclear
 
 Output ONLY valid JSON with no other text:
 {
@@ -45,7 +57,7 @@ Output ONLY valid JSON with no other text:
 }""",
             messages=[{
                 "role": "user",
-                "content": f"""BITCOIN DAY TRADING SIGNAL REQUEST
+                "content": f"""ETHEREUM DAY TRADING SIGNAL REQUEST
 
 Selected indicators:
 {indicators_text}
@@ -59,9 +71,9 @@ Account context:
 Current capital: ${capital:,.2f}
 Max risk this trade: ${risk_amount:.2f} (2% of capital)
 
-Target: small high-probability win (0.5-1.5% move)
+Target: aggressive day trade (0.5-2% move)
 Set stop loss so max loss = ${risk_amount:.2f}
-Set take profit at 2x the risk distance (2:1 reward:risk)
+Set take profit at 1.5x the stop loss distance (1.5:1 reward:risk)
 
 Generate day trading signal now."""
             }]

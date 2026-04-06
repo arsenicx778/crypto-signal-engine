@@ -19,9 +19,14 @@ def compute_indicators(df):
         indicators["bb_upper"]    = round(bb.bollinger_hband().iloc[-1], 4)
         indicators["bb_lower"]    = round(bb.bollinger_lband().iloc[-1], 4)
         indicators["bb_mid"]      = round(bb.bollinger_mavg().iloc[-1], 4)
+        bb_mid_val = indicators["bb_mid"]
+        indicators["bb_width"]    = round((indicators["bb_upper"] - indicators["bb_lower"]) / bb_mid_val, 6) if bb_mid_val else 0.0
         indicators["atr"]         = round(ta.volatility.AverageTrueRange(high, low, close, window=14).average_true_range().iloc[-1], 4)
         indicators["vwap"]        = round(ta.volume.VolumeWeightedAveragePrice(high, low, close, volume).volume_weighted_average_price().iloc[-1], 4)
-        indicators["adx"]         = round(ta.trend.ADXIndicator(high, low, close, window=14).adx().iloc[-1], 4)
+        adx_obj = ta.trend.ADXIndicator(high, low, close, window=14)
+        indicators["adx"]         = round(adx_obj.adx().iloc[-1], 4)
+        indicators["di_plus"]     = round(adx_obj.adx_pos().iloc[-1], 4)
+        indicators["di_minus"]    = round(adx_obj.adx_neg().iloc[-1], 4)
         indicators["obv"]         = round(ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume().iloc[-1], 4)
         indicators["close"]       = round(close.iloc[-1], 4)
         return {"success": True, "data": indicators}

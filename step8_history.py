@@ -1,21 +1,13 @@
-import os
-import csv
 import anthropic
-from datetime import datetime
 from dotenv import load_dotenv
+from signal_store import read_latest_signals
 
 load_dotenv()
 client = anthropic.Anthropic()
 
-SIGNALS_FILE = "signals.csv"
-
 def load_history(n=10):
-    if not os.path.exists(SIGNALS_FILE):
-        return []
     try:
-        with open(SIGNALS_FILE, "r") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+        rows = read_latest_signals()
         return rows[-n:] if len(rows) >= n else rows
     except Exception as e:
         print(f"[WARN] Could not load history: {e}")

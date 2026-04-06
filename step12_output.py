@@ -1,28 +1,18 @@
-import os
-import csv
 import time
 import threading
 import requests
-from datetime import datetime
 from dotenv import load_dotenv
+from signal_store import append_signal_row, read_latest_signals
+from time_utils import now_pacific_str
 
 load_dotenv()
-
-SIGNALS_FILE = "signals.csv"
-FIELDNAMES = [
-    "timestamp", "signal", "confidence",
-    "entry_price", "stop_loss", "take_profit",
-    "outcome", "close_price", "close_time",
-    "ta_summary", "sentiment_summary",
-    "history_summary", "decision_rationale",
-    "overrides", "indicators"
-]
+ACTIVE_MONITORS = set()
 
 def get_current_price():
     try:
         r = requests.get(
             "https://api.kraken.com/0/public/Ticker",
-            params={"pair": "XBTUSD"},
+            params={"pair": "ETHUSD"},
             timeout=5
         )
         data = r.json()
@@ -42,8 +32,7 @@ def format_indicators(filtered_indicators):
     return " | ".join(parts)
 
 def save_signal(signal, overrides, filtered_indicators=None):
-    file_exists = os.path.exists(SIGNALS_FILE)
-    timestamp   = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp   = now_pacific_str()
     price       = get_current_price()
     indicators  = format_indicators(filtered_indicators or {})
 
@@ -62,18 +51,16 @@ def save_signal(signal, overrides, filtered_indicators=None):
         "history_summary":    signal["reasoning"].get("history_summary"),
         "decision_rationale": signal["reasoning"].get("decision_rationale"),
         "overrides":          " | ".join(overrides) if overrides else None,
-        "indicators":         indicators
+        "indicators":         indicators,
+        "tp_adjustments":     0,
+        "tp_adjustment_log":  None,
     }
 
-    with open(SIGNALS_FILE, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        if not file_exists:
-            writer.writeheader()
-        writer.writerow(row)
+    append_signal_row(row)
 
     # ── PRINT OUTPUT ──────────────────────────────────────────────
     print(f"\n{'='*55}")
-    print(f"  BTC PRICE:  ${price:,.2f}" if price else "  BTC PRICE:  unavailable")
+    print(f"  ETH PRICE:  ${price:,.2f}" if price else "  ETH PRICE:  unavailable")
     print(f"  INDICATORS: {indicators}")
     print(f"  {'─'*51}")
     print(f"  SIGNAL:     {row['signal']}  |  CONFIDENCE: {row['confidence']}%")
@@ -92,54 +79,94 @@ def save_signal(signal, overrides, filtered_indicators=None):
 
     return row
 
-def monitor_price(timestamp, stop_loss, take_profit):
+def _get_trade_by_timestamp(timestamp):
+    rows = read_latest_signals()
+    for row in reversed(rows):
+        if row.get("timestamp") == timestamp:
+            return row
+    return None
+
+def monitor_price(timestamp, stop_loss=None, take_profit=None):
+    trade = _get_trade_by_timestamp(timestamp)
+    if not trade:
+        print(f"[MONITOR] No trade found for {timestamp}")
+        return
+    stop_loss = float(trade.get("stop_loss") or stop_loss or 0)
+    take_profit = float(trade.get("take_profit") or take_profit or 0)
     if not stop_loss or not take_profit:
+        return
+    if timestamp in ACTIVE_MONITORS:
         return
 
     def _monitor():
-        print(f"[MONITOR] Watching | SL:${stop_loss:,.2f} TP:${take_profit:,.2f}")
-        while True:
-            try:
-                r = requests.get(
-                    "https://api.kraken.com/0/public/Ticker",
-                    params={"pair": "XBTUSD"},
-                    timeout=5
-                )
-                data  = r.json()
-                price = float(list(data["result"].values())[0]["c"][0])
-                print(f"[MONITOR] BTC: ${price:,.2f} | SL:${stop_loss:,.2f} TP:${take_profit:,.2f}")
-
-                if price <= stop_loss:
-                    _update_outcome(timestamp, "L", price)
-                    print(f"[MONITOR] STOP LOSS HIT at ${price:,.2f} — trade marked L")
+        ACTIVE_MONITORS.add(timestamp)
+        try:
+            print(f"[MONITOR] Watching trade {timestamp}")
+            while True:
+                latest_trade = _get_trade_by_timestamp(timestamp)
+                if not latest_trade:
+                    print(f"[MONITOR] Trade {timestamp} no longer found")
                     break
-                elif price >= take_profit:
-                    _update_outcome(timestamp, "W", price)
-                    print(f"[MONITOR] TAKE PROFIT HIT at ${price:,.2f} — trade marked W")
+                if latest_trade.get("outcome") != "pending":
+                    print(f"[MONITOR] Trade {timestamp} already closed as {latest_trade.get('outcome')}")
                     break
 
+                stop_loss_live = float(latest_trade.get("stop_loss") or 0)
+                take_profit_live = float(latest_trade.get("take_profit") or 0)
+                if not stop_loss_live or not take_profit_live:
+                    print(f"[MONITOR] Trade {timestamp} missing TP/SL")
+                    break
+
+                try:
+                    r = requests.get(
+                        "https://api.kraken.com/0/public/Ticker",
+                        params={"pair": "ETHUSD"},
+                        timeout=5
+                    )
+                    data  = r.json()
+                    price = float(list(data["result"].values())[0]["c"][0])
+                    print(
+                        f"[MONITOR] ETH: ${price:,.2f} | SL:${stop_loss_live:,.2f} TP:${take_profit_live:,.2f}"
+                    )
+
+                    if price <= stop_loss_live:
+                        _update_outcome(timestamp, "L", price)
+                        print(f"[MONITOR] STOP LOSS HIT at ${price:,.2f} — trade marked L")
+                        break
+                    if price >= take_profit_live:
+                        _update_outcome(timestamp, "W", price)
+                        print(f"[MONITOR] TAKE PROFIT HIT at ${price:,.2f} — trade marked W")
+                        break
+                except Exception as e:
+                    print(f"[MONITOR] Error: {e}")
+
                 time.sleep(15)
-            except Exception as e:
-                print(f"[MONITOR] Error: {e}")
-                time.sleep(15)
+        finally:
+            ACTIVE_MONITORS.discard(timestamp)
 
     threading.Thread(target=_monitor, daemon=True).start()
 
-def _update_outcome(timestamp, outcome, close_price):
-    rows = []
-    with open(SIGNALS_FILE, "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row["timestamp"] == timestamp:
-                row["outcome"]     = outcome
-                row["close_price"] = close_price
-                row["close_time"]  = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            rows.append(row)
+def resume_open_trade_monitor():
+    rows = read_latest_signals()
+    open_trades = [
+        row for row in rows
+        if row.get("signal") == "Buy" and row.get("outcome", "pending") == "pending"
+    ]
+    if not open_trades:
+        return
+    latest_open_trade = open_trades[-1]
+    print(f"[MONITOR] Resuming open trade from {latest_open_trade['timestamp']}")
+    monitor_price(latest_open_trade["timestamp"])
 
-    with open(SIGNALS_FILE, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-        writer.writeheader()
-        writer.writerows(rows)
+def _update_outcome(timestamp, outcome, close_price):
+    rows = read_latest_signals()
+    for row in reversed(rows):
+        if row["timestamp"] == timestamp:
+            row["outcome"] = outcome
+            row["close_price"] = close_price
+            row["close_time"] = now_pacific_str()
+            append_signal_row(row)
+            break
 
 if __name__ == "__main__":
     test_signal = {
