@@ -5,9 +5,9 @@ from signal_store import read_latest_signals
 load_dotenv()
 client = anthropic.Anthropic()
 
-def load_history(n=10):
+def load_history(n=10, signals_file=None):
     try:
-        rows = read_latest_signals()
+        rows = read_latest_signals(signals_file)
         return rows[-n:] if len(rows) >= n else rows
     except Exception as e:
         print(f"[WARN] Could not load history: {e}")

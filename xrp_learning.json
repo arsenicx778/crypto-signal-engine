@@ -1,0 +1,65 @@
+{
+  "coin": "XRP",
+  "generated_at": "2026-04-21 17:00 PT",
+  "trade_count": 31,
+  "overall_win_rate": 55,
+  "patterns": [
+    {
+      "condition": "LONG with DI+ > DI- gap >= 10 and ADX >= 30",
+      "wins": 8,
+      "losses": 3,
+      "win_rate": 73,
+      "recommendation": "Prioritize LONG entries when DI+ exceeds DI- by 10+ points and ADX confirms trend strength above 30.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "SHORT with DI- > DI- gap >= 8 and ADX >= 27",
+      "wins": 4,
+      "losses": 4,
+      "win_rate": 50,
+      "recommendation": "SHORT trades show no edge; avoid or require additional confirmation beyond DI positioning.",
+      "confidence": "low",
+      "sample_size_note": null
+    },
+    {
+      "condition": "LONG with RSI 49-60 and positive sentiment >= +0.15",
+      "wins": 9,
+      "losses": 4,
+      "win_rate": 69,
+      "recommendation": "LONG trades in the 49-60 RSI zone with sentiment >= +0.15 demonstrate strong edge; avoid overbought RSI > 65 on LONG.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "LONG with RSI > 60 (overbought territory)",
+      "wins": 2,
+      "losses": 3,
+      "win_rate": 40,
+      "recommendation": "Avoid LONG entries when RSI exceeds 60; this creates a false strength signal and increases drawdown risk.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "SHORT with low ADX < 20 (weak trend)",
+      "wins": 1,
+      "losses": 2,
+      "win_rate": 33,
+      "recommendation": "Avoid SHORT trades during weak trend conditions (ADX < 20); market lacks directional conviction.",
+      "confidence": "medium",
+      "sample_size_note": "Only 3 observations"
+    },
+    {
+      "condition": "LONG with ADX >= 40 and DI+ > 40",
+      "wins": 3,
+      "losses": 3,
+      "win_rate": 50,
+      "recommendation": "High ADX + strong DI+ shows mixed results; confirm with RSI < 65 to avoid overbought reversals.",
+      "confidence": "medium",
+      "sample_size_note": null
+    }
+  ],
+  "strongest_long_setup": "LONG when DI+ > DI- by 10+ points, ADX 27-40, RSI 49-62, and sentiment >= +0.15. This combination achieved 73% win rate across strong sample size.",
+  "strongest_short_setup": "SHORT trades lack consistent edge (50% or below across all tested conditions). Insufficient conviction to recommend; SHORT only as hedge against failed LONG entries.",
+  "summary": "XRP LONG trades outperform SHORT significantly (67% win rate vs 44%), with the strongest setup combining moderate trend strength (ADX 27-40), clear directional dominance (DI+ gap 10+), mid-range momentum (RSI 49-62), and positive sentiment. Avoid LONG entries in overbought RSI > 60 territory where reversals spike; SHORT positions lack statistical edge and should be deprioritized."
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-04-16 23:57 PT",
+    "trade_count": 20,
+    "overall_win_rate": 75,
+    "summary": "Sentiment is the dominant predictor of trade success: positive sentiment (+0.15+) yields 92% wins while negative sentiment (-0.35 or lower) yields only 43% wins. ADX > 40 and DI+ gaps >= 15 both independently provide 85-89% win rates. The optimal setup combines positive sentiment, strong trend (ADX >= 40), clear directional divergence (DI+ gap >= 15), positive MACD, and RSI 55-70, which together produced 9 consecutive wins with zero losses."
+  },
+  {
+    "timestamp": "2026-04-20 15:36 PT",
+    "trade_count": 40,
+    "overall_win_rate": 32,
+    "summary": "The dataset reveals a critical asymmetry: SHORT trades with positive sentiment and low RSI (38-46) achieve 57% win rate, while LONG trades struggle across all RSI ranges, particularly when overbought (RSI >= 65 showing 25% win rate). High confidence LONG trades consistently fail, suggesting overconfidence precedes reversals. The brain should prioritize SHORT setups with bullish sentiment anomalies and avoid LONG entries when RSI exceeds 60 or falls in the 50-60 neutral zone."
+  },
+  {
+    "timestamp": "2026-04-21 00:03 PT",
+    "trade_count": 40,
+    "overall_win_rate": 30,
+    "summary": "LONG trades dominate the portfolio but succeed only ~33% of the time, indicating entry conditions are too loose. The highest-edge setup requires RSI > 65, strong DI+ dominance (>43), and MACD confirmation (>2.5). SHORT trades are underperforming (30% win rate) and should be taken only during confirmed downtrends (ADX > 40) with extreme RSI (<40) and clear MACD negativity. Tighten LONG entry requirements significantly to improve edge."
+  },
+  {
+    "timestamp": "2026-04-21 12:27 PT",
+    "trade_count": 40,
+    "overall_win_rate": 30,
+    "summary": "The strategy is severely underperforming at 30% overall win rate. The data reveals a critical insight: LONG trades are consistently losing (especially at extreme RSI levels >65), while SHORT trades with strong directional confirmation (high ADX, strong DI- divergence, negative MACD) show genuine edge at 75%. Recommend shifting from bias toward longs to strict discipline on shorts only when ADX>30, DI->40, MACD<-1.0, and eliminating longs when RSI>65 or when DI+ gap advantage is small."
+  },
+  {
+    "timestamp": "2026-04-21 13:27 PT",
+    "trade_count": 40,
+    "overall_win_rate": 30,
+    "summary": "Long trades are systemically underperforming (23% win rate on the primary setup), driven by poor risk/reward when entering with extreme RSI readings above 65 or high MACD values. Shorts show a clear edge when trend strength (ADX) and directional control (DI-) are both confirmed, achieving 63% win rates. The brain should drastically reduce long frequency and only enter longs in the 50-62 RSI zone with strong directional confluence, while leaning heavily into shorts when both ADX >= 27 and DI- clearly dominates."
+  }
+]

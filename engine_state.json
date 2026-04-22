@@ -1,0 +1,42 @@
+{
+  "last_updated": "2026-04-21 17:54:36",
+  "cycle_counter": 764,
+  "coins": {
+    "ETH": {
+      "capital": 1000.0,
+      "open_longs": 0,
+      "open_shorts": 0,
+      "last_learn_cycle": 0,
+      "consecutive_losses": 0,
+      "last_signal_direction": "",
+      "last_signal_time": ""
+    },
+    "SOL": {
+      "capital": 1000.0,
+      "open_longs": 0,
+      "open_shorts": 0,
+      "last_learn_cycle": 0,
+      "consecutive_losses": 0,
+      "last_signal_direction": "",
+      "last_signal_time": ""
+    },
+    "XRP": {
+      "capital": 1000.0,
+      "open_longs": 0,
+      "open_shorts": 0,
+      "last_learn_cycle": 0,
+      "consecutive_losses": 0,
+      "last_signal_direction": "",
+      "last_signal_time": ""
+    },
+    "AVAX": {
+      "capital": 1000.0,
+      "open_longs": 0,
+      "open_shorts": 0,
+      "last_learn_cycle": 0,
+      "consecutive_losses": 0,
+      "last_signal_direction": "",
+      "last_signal_time": ""
+    }
+  }
+}

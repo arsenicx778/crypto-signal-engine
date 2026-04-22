@@ -1,0 +1,65 @@
+{
+  "coin": "AVAX",
+  "generated_at": "2026-04-20 15:36 PT",
+  "trade_count": 10,
+  "overall_win_rate": 50,
+  "patterns": [
+    {
+      "condition": "LONG with ADX > 35 (strong trend)",
+      "wins": 3,
+      "losses": 1,
+      "win_rate": 75,
+      "recommendation": "Prioritize LONG entries when ADX exceeds 35, indicating strong directional momentum.",
+      "confidence": "high",
+      "sample_size_note": "4 observations"
+    },
+    {
+      "condition": "LONG with ADX < 25 (weak trend)",
+      "wins": 1,
+      "losses": 3,
+      "win_rate": 25,
+      "recommendation": "Avoid LONG entries when ADX is below 25; weak trends lead to losses 75% of the time.",
+      "confidence": "high",
+      "sample_size_note": "4 observations"
+    },
+    {
+      "condition": "LONG with DI+ > DI- gap >= 10 points AND ADX > 30",
+      "wins": 3,
+      "losses": 0,
+      "win_rate": 100,
+      "recommendation": "Execute LONG trades when DI+ exceeds DI- by at least 10 points with ADX > 30; perfect edge detected.",
+      "confidence": "high",
+      "sample_size_note": "3 observations"
+    },
+    {
+      "condition": "LONG with RSI > 65 (overbought)",
+      "wins": 0,
+      "losses": 1,
+      "win_rate": 0,
+      "recommendation": "Avoid LONG entries when RSI exceeds 65; overbought conditions correlate with reversals.",
+      "confidence": "medium",
+      "sample_size_note": "1 observation, small sample"
+    },
+    {
+      "condition": "LONG with SENTIMENT between -0.35 and +0.15",
+      "wins": 2,
+      "losses": 1,
+      "win_rate": 67,
+      "recommendation": "LONG trades perform well with neutral to slightly positive sentiment; avoid extreme sentiment readings.",
+      "confidence": "medium",
+      "sample_size_note": "3 observations"
+    },
+    {
+      "condition": "SHORT direction trades",
+      "wins": 1,
+      "losses": 1,
+      "win_rate": 50,
+      "recommendation": "SHORT trades show insufficient edge; focus strategy on LONG setups with strong ADX and DI+ > DI- criteria.",
+      "confidence": "low",
+      "sample_size_note": "2 observations"
+    }
+  ],
+  "strongest_long_setup": "LONG with ADX > 35, DI+ > DI- by at least 10 points, RSI 55-65, and sentiment between -0.35 and +0.72 (avoid extremes). This setup produced 3 wins and 0 losses.",
+  "strongest_short_setup": "Insufficient edge. Only 2 SHORT trades in dataset with 50% win rate; recommend avoiding or requiring additional confirming indicators.",
+  "summary": "LONG trades dominate the dataset with a 56% win rate when ADX > 35, indicating trend strength is critical. The strongest pattern is LONG entries with large DI+ > DI- gaps (\u226510 points) and ADX > 30, which achieved 100% win rate. Conversely, LONG trades with ADX < 25 failed 75% of the time. Avoid RSI > 65 overbought conditions and extreme sentiment readings; neutral-to-positive sentiment performs best."
+}

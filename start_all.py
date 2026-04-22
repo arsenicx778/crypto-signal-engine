@@ -32,7 +32,7 @@ def main():
     engine = subprocess.Popen([sys.executable, "main.py"], cwd=ROOT)
     processes.append(engine)
 
-    time.sleep(1)
+    time.sleep(3)
 
     print("Starting dashboard...")
     dashboard = subprocess.Popen([sys.executable, "dashboard.py"], cwd=ROOT)

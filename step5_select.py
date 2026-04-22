@@ -6,10 +6,12 @@ from dotenv import load_dotenv
 load_dotenv()
 client = anthropic.Anthropic()
 
+MANDATORY_INDICATORS = ["di_plus", "di_minus"]
+
 CANDIDATE_INDICATORS = [
     "rsi", "ema_20", "ema_50", "macd", "macd_signal",
     "macd_hist", "bb_upper", "bb_lower", "bb_mid", "bb_width",
-    "atr", "vwap", "adx", "di_plus", "di_minus", "obv"
+    "atr", "vwap", "adx", "obv"
 ]
 
 def select_indicators(all_indicators):
@@ -39,16 +41,17 @@ Output ONLY valid JSON in this exact format with no other text:
         clean = raw.removeprefix("```json").removesuffix("```").strip()
         result = json.loads(clean)
         valid = [i for i in result["selected"] if i in CANDIDATE_INDICATORS]
-        result["selected"] = valid
-        result["count"] = len(valid)
+        merged = MANDATORY_INDICATORS + [i for i in valid if i not in MANDATORY_INDICATORS]
+        result["selected"] = merged
+        result["count"] = len(merged)
         return {"success": True, "data": result}
     except Exception as e:
         print(f"[WARN] Indicator selection failed: {e} — using defaults")
         return {
             "success": True,
             "data": {
-                "selected": ["rsi", "macd", "macd_signal", "atr"],
-                "count": 4,
+                "selected": ["di_plus", "di_minus", "rsi", "macd", "macd_signal", "atr"],
+                "count": 6,
                 "reason": "fallback defaults"
             }
         }

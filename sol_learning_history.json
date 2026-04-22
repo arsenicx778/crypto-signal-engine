@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2026-04-16 23:58 PT",
+    "trade_count": 17,
+    "overall_win_rate": 53,
+    "summary": "Positive sentiment (>= +0.15) is the strongest predictive filter with 100% win rate but limited sample. For negative/neutral sentiment periods, require strong trend (ADX >= 38), large DI+ gap (>= 15 points), and positive MACD momentum to justify entries. Weak ADX (< 25) during negative sentiment should be avoided entirely. The brain should weight sentiment strongly in entry decisions and use ADX/DI divergence as confirmation rather than standalone signals."
+  },
+  {
+    "timestamp": "2026-04-20 15:36 PT",
+    "trade_count": 39,
+    "overall_win_rate": 33,
+    "summary": "The brain demonstrates a strong LONG bias with 20W-19L on long trades vs 1W-7L on shorts, indicating directional strength only works in uptrend regime. The highest-probability setup requires confluence of strong trend (ADX > 35), momentum confirmation (RSI 50-70, MACD >= 0), and neutral-to-negative sentiment bias\u2014avoid chasing during sentiment extremes above +0.15. Never initiate trades in low-ADX (<20) environments regardless of other signals."
+  }
+]

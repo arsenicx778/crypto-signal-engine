@@ -1,0 +1,65 @@
+{
+  "coin": "ETH",
+  "generated_at": "2026-04-21 13:27 PT",
+  "trade_count": 40,
+  "overall_win_rate": 30,
+  "patterns": [
+    {
+      "condition": "LONG with RSI >= 65 and DI+ >= 40",
+      "wins": 2,
+      "losses": 4,
+      "win_rate": 33,
+      "recommendation": "Avoid longing when RSI is extremely overbought (>=65) even with strong directional conviction; these often reverse.",
+      "confidence": "medium",
+      "sample_size_note": "6 observations"
+    },
+    {
+      "condition": "SHORT with ADX >= 27 and DI- >= 37",
+      "wins": 5,
+      "losses": 3,
+      "win_rate": 63,
+      "recommendation": "Short setups with strong trend strength (ADX>=27) and clear downward directional control (DI->=37) show the best edge; prioritize these.",
+      "confidence": "high",
+      "sample_size_note": "8 observations"
+    },
+    {
+      "condition": "LONG with ADX >= 25 and DI+ gap (DI+ minus DI-) >= 15",
+      "wins": 3,
+      "losses": 10,
+      "win_rate": 23,
+      "recommendation": "Avoid longing even with good directional gaps; this setup has consistently poor outcomes regardless of ADX strength.",
+      "confidence": "high",
+      "sample_size_note": "13 observations"
+    },
+    {
+      "condition": "SHORT with RSI < 40 and ADX >= 20",
+      "wins": 4,
+      "losses": 4,
+      "win_rate": 50,
+      "recommendation": "Shorts with oversold RSI below 40 and confirmed trend (ADX>=20) offer neutral edge; use additional confirmation before entering.",
+      "confidence": "medium",
+      "sample_size_note": "8 observations"
+    },
+    {
+      "condition": "LONG with MACD > 2.5 and sentiment > 0.30",
+      "wins": 1,
+      "losses": 4,
+      "win_rate": 20,
+      "recommendation": "Do not long when MACD is extremely elevated (>2.5) despite positive sentiment; momentum extremes precede reversals.",
+      "confidence": "medium",
+      "sample_size_note": "5 observations"
+    },
+    {
+      "condition": "LONG with RSI 50-60 and DI+ >= 40 and ADX >= 25",
+      "wins": 2,
+      "losses": 2,
+      "win_rate": 50,
+      "recommendation": "This balanced setup with mid-range RSI, strong uptrend indicators, and confirmed trend strength offers the most reliable long conditions.",
+      "confidence": "medium",
+      "sample_size_note": "4 observations"
+    }
+  ],
+  "strongest_long_setup": "LONG when RSI is 50-62 (not overbought), DI+ >= 40, ADX >= 25, and DI+ gap >= 15; avoids overbought reversals while maintaining directional and trend confirmation.",
+  "strongest_short_setup": "SHORT when RSI < 40, ADX >= 27, DI- >= 37, and DI- significantly exceeds DI+ (gap >= 15); this captures momentum-confirmed downtrends with 63% win rate.",
+  "summary": "Long trades are systemically underperforming (23% win rate on the primary setup), driven by poor risk/reward when entering with extreme RSI readings above 65 or high MACD values. Shorts show a clear edge when trend strength (ADX) and directional control (DI-) are both confirmed, achieving 63% win rates. The brain should drastically reduce long frequency and only enter longs in the 50-62 RSI zone with strong directional confluence, while leaning heavily into shorts when both ADX >= 27 and DI- clearly dominates."
+}

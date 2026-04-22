@@ -13,11 +13,11 @@ EXTREME_SENTIMENT_SCORE = 0.75
 MIN_HEADLINES_FOR_TP_ADJUST = 3
 
 
-def get_current_price():
+def get_current_price(symbol="XETHZUSD"):
     try:
         r = requests.get(
             "https://api.kraken.com/0/public/Ticker",
-            params={"pair": "ETHUSD"},
+            params={"pair": symbol},
             timeout=5,
         )
         data = r.json()
@@ -25,9 +25,10 @@ def get_current_price():
     except Exception:
         return None
 
-def get_open_trade():
+
+def get_open_trade(signals_file=None):
     try:
-        rows = read_latest_signals()
+        rows = read_latest_signals(signals_file)
         open_trades = [
             r for r in rows
             if r.get("signal") == "Buy" and r.get("outcome", "pending") == "pending"
@@ -36,7 +37,8 @@ def get_open_trade():
     except:
         return None
 
-def check_tp_adjustment(trade, sentiment):
+
+def check_tp_adjustment(trade, sentiment, symbol="XETHZUSD"):
     try:
         adjustments_so_far = int(trade.get("tp_adjustments", 0) or 0)
 
@@ -44,10 +46,10 @@ def check_tp_adjustment(trade, sentiment):
             print(f"[TP] Max adjustments ({MAX_ADJUSTMENTS}) reached — no further adjustment")
             return None
 
-        news_score    = sentiment.get("news_score", 0.0)
+        news_score     = sentiment.get("news_score", 0.0)
         headline_count = sentiment.get("headline_count", 0)
-        entry_price = float(trade.get("entry_price", 0) or 0)
-        current_price = get_current_price()
+        entry_price    = float(trade.get("entry_price", 0) or 0)
+        current_price  = get_current_price(symbol)
 
         if not entry_price or current_price is None:
             print("[TP] Current price unavailable — skipping TP adjustment check")
@@ -55,7 +57,7 @@ def check_tp_adjustment(trade, sentiment):
 
         if current_price <= entry_price:
             print(
-                f"[TP] Trade not in profit yet — current ${current_price:,.2f} vs entry ${entry_price:,.2f}"
+                f"[TP] Trade not in profit yet — current ${current_price:,.4f} vs entry ${entry_price:,.4f}"
             )
             return None
 
@@ -75,7 +77,7 @@ def check_tp_adjustment(trade, sentiment):
             system="""You are a day trading take profit adjustment engine.
 
 You are evaluating whether current news sentiment is extremely strong enough
-to justify moving the take profit higher on an open Ethereum trade.
+to justify moving the take profit higher on an open crypto trade.
 
 This is a DAY TRADING strategy — small frequent wins are the goal.
 Be conservative. Only recommend adjustment on genuinely extreme sentiment
@@ -93,10 +95,10 @@ If adjust is false, new_take_profit must be null.""",
             messages=[{
                 "role": "user",
                 "content": f"""Open trade details:
-Entry price:    ${float(trade.get('entry_price', 0)):,.2f}
-Current price:  ${current_price:,.2f}
-Current TP:     ${float(trade.get('take_profit', 0)):,.2f}
-Current SL:     ${float(trade.get('stop_loss', 0)):,.2f}
+Entry price:    ${float(trade.get('entry_price', 0)):,.4f}
+Current price:  ${current_price:,.4f}
+Current TP:     ${float(trade.get('take_profit', 0)):,.4f}
+Current SL:     ${float(trade.get('stop_loss', 0)):,.4f}
 Adjustments so far: {adjustments_so_far} of {MAX_ADJUSTMENTS} max
 
 Current sentiment:
@@ -117,16 +119,15 @@ If adjusting, set new TP conservatively — this is day trading, not investing."
             new_tp = float(result["new_take_profit"])
             old_tp = float(trade.get("take_profit", 0))
 
-            # Safety check — new TP must be higher than old TP
             if new_tp <= old_tp:
-                print(f"[TP] Rejected — new TP ${new_tp:,.2f} not higher than current ${old_tp:,.2f}")
+                print(f"[TP] Rejected — new TP ${new_tp:,.4f} not higher than current ${old_tp:,.4f}")
                 return None
 
-            print(f"[TP] Adjusting TP: ${old_tp:,.2f} → ${new_tp:,.2f} | {result['reason']}")
+            print(f"[TP] Adjusting TP: ${old_tp:,.4f} → ${new_tp:,.4f} | {result['reason']}")
             return {
                 "new_take_profit":  new_tp,
                 "adjustments_used": adjustments_so_far + 1,
-                "reason":           result["reason"]
+                "reason":           result["reason"],
             }
         else:
             print(f"[TP] No adjustment needed: {result.get('reason', 'sentiment not strong enough')}")
@@ -136,34 +137,38 @@ If adjusting, set new TP conservatively — this is day trading, not investing."
         print(f"[TP] Adjustment check failed: {e}")
         return None
 
-def apply_tp_adjustment(trade_timestamp, new_tp, adjustments_used, reason):
-    for row in reversed(read_latest_signals()):
+
+def apply_tp_adjustment(trade_timestamp, new_tp, adjustments_used, reason, signals_file=None):
+    for row in reversed(read_latest_signals(signals_file)):
         if row["timestamp"] != trade_timestamp:
             continue
-        row["take_profit"] = new_tp
-        row["tp_adjustments"] = adjustments_used
+        row["take_profit"]      = new_tp
+        row["tp_adjustments"]   = adjustments_used
         log = row.get("tp_adjustment_log", "") or ""
         timestamp = now_pacific_clock()
-        row["tp_adjustment_log"] = f"{log} | [{timestamp}] TP->${new_tp:,.2f}: {reason}".strip(" |")
-        append_signal_row(row)
-        print(f"[TP] signals.csv appended — adjustment {adjustments_used}/{MAX_ADJUSTMENTS} applied")
+        row["tp_adjustment_log"] = f"{log} | [{timestamp}] TP->${new_tp:,.4f}: {reason}".strip(" |")
+        append_signal_row(row, signals_file)
+        print(f"[TP] CSV appended — adjustment {adjustments_used}/{MAX_ADJUSTMENTS} applied")
         break
 
-def run_tp_adjustment(sentiment):
-    trade = get_open_trade()
+
+def run_tp_adjustment(sentiment, signals_file=None, symbol="XETHZUSD"):
+    trade = get_open_trade(signals_file)
 
     if not trade:
         return
 
-    result = check_tp_adjustment(trade, sentiment)
+    result = check_tp_adjustment(trade, sentiment, symbol=symbol)
 
     if result:
         apply_tp_adjustment(
             trade["timestamp"],
             result["new_take_profit"],
             result["adjustments_used"],
-            result["reason"]
+            result["reason"],
+            signals_file=signals_file,
         )
+
 
 if __name__ == "__main__":
     test_sentiment = {"news_score": 0.85, "headline_count": 18}

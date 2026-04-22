@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2026-04-20 15:36 PT",
+    "trade_count": 28,
+    "overall_win_rate": 61,
+    "summary": "XRP longs significantly outperform shorts (63% vs 50% win rate). The strongest long signal combines ADX > 27 with a DI+ dominance of 10+ points and RSI in the 49-65 range; avoid RSI > 65 extremes. Shorts should only be considered during clear downtrends with DI- dominance and never during bullish sentiment > +0.30. Respect the ADX threshold of 27+ for directional trades to filter out low-conviction setups."
+  },
+  {
+    "timestamp": "2026-04-21 17:00 PT",
+    "trade_count": 31,
+    "overall_win_rate": 55,
+    "summary": "XRP LONG trades outperform SHORT significantly (67% win rate vs 44%), with the strongest setup combining moderate trend strength (ADX 27-40), clear directional dominance (DI+ gap 10+), mid-range momentum (RSI 49-62), and positive sentiment. Avoid LONG entries in overbought RSI > 60 territory where reversals spike; SHORT positions lack statistical edge and should be deprioritized."
+  }
+]

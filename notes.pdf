@@ -1,0 +1,1 @@
+pkill -f "python main.py"; pkill -f "python dashboard.py"; lsof -ti:8765 | xargs kill -9 2>/dev/null; sleep 2 && ./start_all_caffeinated.sh

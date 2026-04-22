@@ -13,7 +13,7 @@ COINDESK_RSS      = "https://www.coindesk.com/arc/outboundfeeds/rss/"
 COINTELEGRAPH_RSS = "https://cointelegraph.com/rss"
 
 # ── KRAKEN ──────────────────────────────────────────────────────────
-def fetch_candles_kraken(symbol="ETHUSD", interval=1, limit=200):
+def fetch_candles_kraken(symbol="XETHZUSD", interval=1, limit=200):
     try:
         url    = f"{KRAKEN_BASE}/OHLC"
         params = {"pair": symbol, "interval": interval}
@@ -37,12 +37,12 @@ def fetch_candles_kraken(symbol="ETHUSD", interval=1, limit=200):
         return {"success": False, "source": "kraken", "error": str(e), "data": None}
 
 # ── PRIMARY FETCH ───────────────────────────────────────────────────
-def fetch_candles():
-    result = fetch_candles_kraken()
+def fetch_candles(symbol="XETHZUSD"):
+    result = fetch_candles_kraken(symbol=symbol)
     if result["success"]:
-        print(f"[FETCH] Candles from Kraken — {len(result['data'])} candles")
+        print(f"[FETCH:{symbol}] Candles from Kraken — {len(result['data'])} candles")
         return result
-    print(f"[ABORT] Kraken fetch failed: {result['error']}")
+    print(f"[ABORT:{symbol}] Kraken fetch failed: {result['error']}")
     return {"success": False, "source": "none", "error": result["error"], "data": None}
 
 # ── NEWS ────────────────────────────────────────────────────────────
