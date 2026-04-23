@@ -5,14 +5,14 @@ import json
 import os
 import threading
 import webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 import requests
-from signal_store import read_latest_signals
+import dashboard_metrics as dm
 
 PORT               = 8765
-COIN_CAPITAL_START = 1000.0
+COIN_CAPITAL_START = dm.COIN_CAPITAL_START
 RISK_PERCENT   = 0.02
 REWARD_PERCENT = 0.03
 KRAKEN_BASE        = "https://api.kraken.com/0/public"
@@ -21,12 +21,7 @@ KRAKEN_PAIRS = {
 }
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
-COIN_CSV_FILES = {
-    "ETH":  os.path.join(_BASE, "eth_signals.csv"),
-    "SOL":  os.path.join(_BASE, "sol_signals.csv"),
-    "AVAX": os.path.join(_BASE, "avax_signals.csv"),
-    "XRP":  os.path.join(_BASE, "xrp_signals.csv"),
-}
+COIN_CSV_FILES = dm.COIN_CSV_FILES
 
 
 def fetch_coin_price(coin):
@@ -102,20 +97,11 @@ def fetch_market_candles(period, coin="ETH"):
 
 def read_signals():
     """Read all four coin CSVs and return merged list with 'coin' field on each row."""
-    all_signals = []
-    for coin_name, csv_path in COIN_CSV_FILES.items():
-        try:
-            rows = read_latest_signals(csv_path)
-            for row in rows:
-                row["coin"] = coin_name
-            all_signals.extend(rows)
-        except Exception:
-            pass
-    all_signals.sort(key=lambda r: r.get("timestamp") or "")
-    return all_signals
+    return dm.get_all_signals()
 
 
 def compute_stats(signals):
+    # Kept for compatibility with older backend call sites that compute ad hoc subsets.
     tradeable = [s for s in signals if s.get("signal") in ("Buy", "Sell")]
     wins      = [s for s in tradeable if s.get("outcome") == "W"]
     losses    = [s for s in tradeable if s.get("outcome") == "L"]
@@ -125,9 +111,16 @@ def compute_stats(signals):
     total_losses = len(losses)
     completed    = total_wins + total_losses
     win_rate     = (total_wins / completed * 100) if completed > 0 else 0
-    # Replay using stored amounts per trade; fall back to % of running capital
-    capital = COIN_CAPITAL_START * 4
-    for s in tradeable:
+    coins_seen = {s.get("coin") for s in tradeable if s.get("coin")}
+    capital = COIN_CAPITAL_START * (len(coins_seen) or 4)
+    closed_sorted = sorted(
+        [s for s in tradeable if s.get("outcome") in ("W", "L")],
+        key=lambda row: (
+            dm.parse_signal_timestamp(row.get("close_time")) or dm.parse_signal_timestamp(row.get("timestamp")) or datetime.min.replace(tzinfo=dm.PACIFIC_TZ),
+            dm.parse_signal_timestamp(row.get("timestamp")) or datetime.min.replace(tzinfo=dm.PACIFIC_TZ),
+        ),
+    )
+    for s in closed_sorted:
         if s.get("outcome") == "W":
             amt = s.get("reward_amount")
             capital += float(amt) if amt else round(capital * REWARD_PERCENT, 2)
@@ -147,6 +140,7 @@ def compute_stats(signals):
         "win_rate":         win_rate,
         "wins":             total_wins,
         "losses":           total_losses,
+        "pending_trades":   len(pending),
         "pending_buys":     len(pending),
         "total_signals":    len(signals),
         "total_completed":  completed,
@@ -157,28 +151,8 @@ def compute_stats(signals):
 
 
 def compute_coin_stats(coin_name, csv_path):
-    try:
-        rows = read_latest_signals(csv_path)
-    except Exception:
-        rows = []
-    tradeable = [r for r in rows if r.get("signal") in ("Buy", "Sell")]
-    wins      = [r for r in tradeable if r.get("outcome") == "W"]
-    losses    = [r for r in tradeable if r.get("outcome") == "L"]
-    pending   = [r for r in tradeable if r.get("outcome") == "pending"]
-    longs_open  = [r for r in pending if r.get("signal") == "Buy"]
-    shorts_open = [r for r in pending if r.get("signal") == "Sell"]
-    completed = len(wins) + len(losses)
-    # Replay stored risk/reward amounts; fall back to % of running capital
-    capital = COIN_CAPITAL_START
-    for r in tradeable:
-        if r.get("outcome") == "W":
-            amt = r.get("reward_amount")
-            capital += float(amt) if amt else round(capital * REWARD_PERCENT, 2)
-        elif r.get("outcome") == "L":
-            amt = r.get("risk_amount")
-            capital -= float(amt) if amt else round(capital * RISK_PERCENT, 2)
-    win_rate = round(len(wins) / completed * 100) if completed > 0 else 0
-    open_trade = pending[-1] if pending else None
+    coin_stats = dm.get_coin_stats(coin_name)
+    rows = dm.load_rows_by_coin().get(coin_name, [])
 
     # Prefer live market data; fall back to CSV values only if the market fetch fails.
     current_price = fetch_coin_price(coin_name)
@@ -197,22 +171,8 @@ def compute_coin_stats(coin_name, csv_path):
             if current_price:
                 break
 
-    cap = round(capital, 2)
-    return {
-        "coin":            coin_name,
-        "capital":         cap,
-        "wins":            len(wins),
-        "losses":          len(losses),
-        "pending":         len(pending),
-        "longs_open":      len(longs_open),
-        "shorts_open":     len(shorts_open),
-        "win_rate":        win_rate,
-        "completed":       completed,
-        "open_trade":      open_trade,
-        "current_price":   current_price,
-        "risk_per_trade":  round(cap * RISK_PERCENT, 2),
-        "reward_per_trade": round(cap * REWARD_PERCENT, 2),
-    }
+    coin_stats["current_price"] = current_price
+    return coin_stats
 
 
 HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -266,6 +226,25 @@ a{color:inherit;text-decoration:none}
 .period-btn:hover{color:var(--t1)}
 .period-btn.active{background:var(--s2);color:var(--t1)}
 
+/* ── Live Panel Headings ── */
+.live-panel-head{padding:18px 20px 12px;border-bottom:1px solid var(--sep)}
+.live-panel-head.tight{padding-top:16px}
+.panel-kicker{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-weight:700;margin-bottom:5px}
+.panel-title{font-size:18px;font-weight:600;letter-spacing:-.01em}
+.panel-sub{font-size:12px;color:var(--t2);line-height:1.5;margin-top:5px;max-width:620px}
+
+/* ── Scope Summary ── */
+.scope-bar{padding:14px 20px;border-bottom:1px solid var(--sep);display:flex;flex-direction:column;gap:10px}
+.scope-main{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.scope-title{font-size:15px;font-weight:600}
+.scope-desc{font-size:12px;color:var(--t2);line-height:1.5;margin-top:3px}
+.scope-chips{display:flex;flex-wrap:wrap;gap:8px}
+.scope-chip{display:inline-flex;align-items:center;gap:6px;background:var(--s2);border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:6px 10px;font-size:12px;color:var(--t1)}
+.scope-chip-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t2);font-weight:700}
+.scope-chip-value{font-family:var(--mono)}
+.scope-tip{font-size:11px;color:var(--t2);line-height:1.45}
+.scope-tip strong{color:var(--t1);font-weight:600}
+
 /* ── Position Card ── */
 .position-card{margin:0;padding:20px;border-bottom:1px solid var(--sep)}
 .pos-tag{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--green);font-weight:600;margin-bottom:12px}
@@ -300,8 +279,9 @@ a{color:inherit;text-decoration:none}
 .alert-danger{background:rgba(255,59,48,.08);border:1px solid rgba(255,59,48,.2);color:var(--red)}
 
 /* ── Signal Feed ── */
-.feed-header{padding:20px 20px 10px;display:flex;align-items:center;justify-content:space-between}
+.feed-header{padding:18px 20px 10px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .feed-title{font-size:17px;font-weight:600}
+.feed-subtitle{font-size:12px;color:var(--t2);line-height:1.45;margin-top:4px;max-width:540px}
 .feed-tabs{display:flex;gap:0;background:var(--s2);border-radius:8px;padding:2px}
 .feed-tab{padding:4px 10px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:transparent;color:var(--t2);transition:all .15s}
 .feed-tab.active{background:var(--s1);color:var(--t1)}
@@ -327,6 +307,9 @@ a{color:inherit;text-decoration:none}
 
 .show-more{text-align:center;padding:16px;font-size:13px;color:var(--t2);cursor:pointer;transition:color .15s}
 .show-more:hover{color:var(--t1)}
+.feed-empty{padding:32px 20px;text-align:center}
+.feed-empty-title{font-size:15px;font-weight:600;margin-bottom:6px}
+.feed-empty-copy{font-size:12px;color:var(--t2);line-height:1.5;max-width:520px;margin:0 auto}
 
 /* ── Modal ── */
 .mo{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;backdrop-filter:blur(12px);padding:20px;overflow-y:auto;align-items:flex-start;justify-content:center}
@@ -362,12 +345,17 @@ a{color:inherit;text-decoration:none}
 .met-label{font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
 .met-val{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
 .met-sub{font-size:11px;color:var(--t2);font-family:var(--mono);margin-top:3px}
+.met-hint{font-size:10px;color:var(--t3);margin-top:6px;line-height:1.4}
 
 /* ── Coin Row (4 per-coin cards) ── */
 .coin-row{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--sep)}
 .coin-card{padding:14px 16px;border-right:1px solid var(--sep);cursor:pointer;transition:background .1s}
 .coin-card:last-child{border-right:none}
 .coin-card:hover{background:rgba(255,255,255,.03)}
+.coin-card.active{background:linear-gradient(180deg,rgba(0,200,5,.12),rgba(255,255,255,.02));box-shadow:inset 0 0 0 1px rgba(0,200,5,.2)}
+.coin-card-kicker{font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.08em}
+.coin-card.active .coin-card-kicker{color:var(--green)}
+.coin-card-tip{font-size:10px;color:var(--t2);margin-top:8px;line-height:1.4}
 .cc-name{font-size:13px;font-weight:600;margin-bottom:6px}
 .cc-capital{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin-bottom:3px}
 .cc-record{font-size:11px;color:var(--t2);font-family:var(--mono)}
@@ -388,6 +376,7 @@ a{color:inherit;text-decoration:none}
 
 /* ── Coin Filter Bar ── */
 .coin-filter{display:flex;gap:6px;padding:14px 20px;border-bottom:1px solid var(--sep);flex-wrap:wrap;align-items:center}
+.filter-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--t2);font-weight:600;margin-right:6px}
 .coin-btn{padding:5px 13px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--sep);background:transparent;color:var(--t2);transition:all .15s}
 .coin-btn:hover{color:var(--t1);border-color:var(--t2)}
 .coin-btn.active{background:var(--s2);color:var(--t1);border-color:transparent}
@@ -407,8 +396,9 @@ a{color:inherit;text-decoration:none}
 .abs-range{display:none;gap:12px;align-items:center;flex:1;flex-wrap:wrap}
 .abs-range.show{display:flex}
 .abs-range label{font-size:11px;color:var(--t2);display:flex;align-items:center;gap:5px}
-.abs-range input[type=date],.abs-range input[type=time]{background:var(--s2);border:1px solid var(--sep);color:var(--t1);border-radius:5px;padding:3px 7px;font-size:11px;font-family:var(--mono);cursor:pointer}
-.abs-range input[type=date]:focus,.abs-range input[type=time]:focus{outline:none;border-color:rgba(255,255,255,.3)}
+.abs-range input[type=date],.abs-range input[type=text],.abs-range input[type=time]{background:var(--s2);border:1px solid var(--sep);color:var(--t1);border-radius:5px;padding:3px 7px;font-size:11px;font-family:var(--mono);cursor:pointer}
+.abs-range input[type=text]{min-width:88px}
+.abs-range input[type=date]:focus,.abs-range input[type=text]:focus,.abs-range input[type=time]:focus{outline:none;border-color:rgba(255,255,255,.3)}
 
 /* ── Signal Count ── */
 .sig-count{padding:8px 20px 4px;font-size:12px;color:var(--t2)}
@@ -454,6 +444,9 @@ a{color:inherit;text-decoration:none}
 .ps-prog-track{height:6px;background:var(--s2);border-radius:3px;position:relative;overflow:hidden}
 .ps-prog-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--amber),var(--green));transition:width .5s}
 .ps-prog-fill.done{background:var(--green)}
+.tab-intro{margin:20px 20px 0;padding:14px 16px;background:var(--s2);border:1px solid var(--sep);border-radius:12px}
+.tab-intro-title{font-size:13px;font-weight:600;margin-bottom:4px}
+.tab-intro-copy{font-size:12px;color:var(--t2);line-height:1.55}
 
 @media(max-width:600px){
   .ps-cards{grid-template-columns:1fr 1fr}
@@ -556,6 +549,16 @@ a{color:inherit;text-decoration:none}
 .lr-history-table th{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--t2);text-align:left;padding:6px 8px;font-weight:500;border-bottom:1px solid var(--sep)}
 .lr-history-table td{padding:7px 8px;border-bottom:1px solid var(--sep);font-size:11px;color:var(--t2);font-family:var(--mono);vertical-align:top}
 .lr-history-table td:last-child{font-family:inherit;color:var(--t1);font-size:11px;white-space:normal}
+.lr-legend{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.lr-legend-item{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;background:var(--s2);border-radius:999px;font-size:11px;color:var(--t2)}
+.lr-summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.lr-stat{background:var(--s2);border-radius:10px;padding:12px 14px}
+.lr-stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t2);margin-bottom:4px}
+.lr-stat-value{font-size:15px;font-family:var(--mono);font-weight:600}
+
+@media(max-width:700px){
+  .lr-summary-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
@@ -570,15 +573,15 @@ a{color:inherit;text-decoration:none}
   </div>
   <div class="hdr-r">
     <div class="portfolio-pill" id="hdr-portfolio">$4,000.00</div>
-    <div class="hdr-meta"><span class="live-dot"></span><span id="hdr-countdown">60s</span></div>
+    <div class="hdr-meta"><span class="live-dot"></span><span id="hdr-countdown">Refresh in 60s</span></div>
   </div>
 </header>
 
 <div class="page">
   <div class="page-tabs">
-    <button class="page-tab active" id="tab-live" onclick="switchTab('live')">Live Signals</button>
-    <button class="page-tab" id="tab-project" onclick="switchTab('project')">Project Status</button>
-    <button class="page-tab" id="tab-golive" onclick="switchTab('golive')">Go-Live Tracker</button>
+    <button class="page-tab active" id="tab-live" onclick="switchTab('live')">Live Monitor</button>
+    <button class="page-tab" id="tab-project" onclick="switchTab('project')">Project</button>
+    <button class="page-tab" id="tab-golive" onclick="switchTab('golive')">Readiness</button>
     <button class="page-tab" id="tab-learnings" onclick="switchTab('learnings')">Learnings</button>
   </div>
 
@@ -607,14 +610,15 @@ a{color:inherit;text-decoration:none}
       <button class="period-btn" data-p="1W">1W</button>
     </div>
 
-    <!-- Metrics Strip (4 summary cards) -->
-    <div class="metrics-strip" id="metrics-strip"></div>
-
-    <!-- Coin Row (4 per-coin cards) -->
-    <div class="coin-row" id="coin-row"></div>
+    <div class="live-panel-head">
+      <div class="panel-kicker">Scope & Filters</div>
+      <div class="panel-title">Choose what you want to review</div>
+      <div class="panel-sub">These controls update the summary cards, alerts, and signal log together so the dashboard always stays in one consistent scope.</div>
+    </div>
 
     <!-- Coin Filter + Trades-Only Toggle -->
     <div class="coin-filter" id="coin-filter">
+      <span class="filter-label">Focus</span>
       <button class="coin-btn active" data-coin="all"  onclick="setCoinFilter('all')">All</button>
       <button class="coin-btn"        data-coin="ETH"  onclick="setCoinFilter('ETH')">ETH</button>
       <button class="coin-btn"        data-coin="SOL"  onclick="setCoinFilter('SOL')">SOL</button>
@@ -626,6 +630,7 @@ a{color:inherit;text-decoration:none}
 
     <!-- Date Filter Bar -->
     <div class="date-filter" id="date-filter">
+      <span class="filter-label">Window</span>
       <div class="quick-btns" id="quick-btns">
         <button class="quick-btn" data-q="today"  onclick="setQuickFilter('today')">Today</button>
         <button class="quick-btn" data-q="24h"    onclick="setQuickFilter('24h')">Last 24h</button>
@@ -634,11 +639,25 @@ a{color:inherit;text-decoration:none}
         <button class="quick-btn" data-q="all"    onclick="setQuickFilter('all')">All time</button>
       </div>
       <div class="abs-range" id="abs-range">
-        <label>From <input type="date" id="abs-from-date"> <input type="time" id="abs-from-time" value="00:00"></label>
-        <label>To &nbsp;&nbsp;<input type="date" id="abs-to-date"> <input type="time" id="abs-to-time" value="23:59"></label>
+        <label>From <input type="date" id="abs-from-date"> <input type="text" id="abs-from-time" value="12:00 AM" placeholder="h:mm AM"></label>
+        <label>To &nbsp;&nbsp;<input type="date" id="abs-to-date"> <input type="text" id="abs-to-time" value="11:59 PM" placeholder="h:mm PM"></label>
       </div>
       <span class="date-filter-mode" id="date-mode-toggle" onclick="toggleDateMode()">switch to date range</span>
     </div>
+
+    <div class="scope-bar" id="scope-bar"></div>
+
+    <div class="live-panel-head tight">
+      <div class="panel-kicker">Performance Snapshot</div>
+      <div class="panel-title">Current view summary</div>
+      <div class="panel-sub">Start here to understand the active scope, then use the signal log below to inspect specific trades and skipped entries.</div>
+    </div>
+
+    <!-- Metrics Strip (4 summary cards) -->
+    <div class="metrics-strip" id="metrics-strip"></div>
+
+    <!-- Coin Row (4 per-coin cards) -->
+    <div class="coin-row" id="coin-row"></div>
 
     <!-- Signal Count -->
     <div class="sig-count" id="sig-count"></div>
@@ -648,7 +667,10 @@ a{color:inherit;text-decoration:none}
 
     <!-- Signal Feed -->
     <div class="feed-header">
-      <div class="feed-title">Signals</div>
+      <div>
+        <div class="feed-title">Signal Log</div>
+        <div class="feed-subtitle" id="feed-subtitle">Review closed trades, open positions, and skipped entries for the current scope.</div>
+      </div>
       <div class="feed-tabs" id="feed-tabs"></div>
     </div>
     <div id="feed-list"></div>
@@ -712,30 +734,176 @@ let chartCandles = [];
 let tradesOnly  = true;           // CHANGE 1: hide DNE by default
 let quickFilter = '48h';          // CHANGE 2: default last 48h
 let dateMode    = 'relative';     // 'relative' | 'absolute'
+const PACIFIC_TZ = 'America/Los_Angeles';
+const PACIFIC_PARTS_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: PACIFIC_TZ,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+const PACIFIC_TIME_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: PACIFIC_TZ,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: true,
+});
+const PACIFIC_DATE_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: PACIFIC_TZ,
+  month: 'short',
+  day: 'numeric',
+});
+const PACIFIC_OFFSET_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: PACIFIC_TZ,
+  timeZoneName: 'shortOffset',
+  hour: '2-digit',
+  hourCycle: 'h23',
+});
 
 // ── Date filter helpers ───────────────────────────────────────────────────────
+function pacificParts(date){
+  const parts = {};
+  PACIFIC_PARTS_FMT.formatToParts(date).forEach(p => {
+    if (p.type !== 'literal') parts[p.type] = p.value;
+  });
+  return parts;
+}
+
+function pacificDateKey(date){
+  const p = pacificParts(date);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function pacificTimeKey(date){
+  const p = pacificParts(date);
+  return `${p.hour}:${p.minute}`;
+}
+
+function pacificDateValue(date){
+  const p = pacificParts(date);
+  return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day));
+}
+
+function pacificZoneLabel(date){
+  return 'PST';
+}
+
+function pacificOffsetMinutes(date){
+  const tzName = PACIFIC_OFFSET_FMT.formatToParts(date).find(p => p.type === 'timeZoneName')?.value || 'GMT-8';
+  const m = tzName.match(/GMT([+-])(\d{1,2})(?::?(\d{2}))?/i);
+  if (!m) return -8 * 60;
+  const sign = m[1] === '-' ? -1 : 1;
+  const hours = Number(m[2] || 0);
+  const minutes = Number(m[3] || 0);
+  return sign * (hours * 60 + minutes);
+}
+
+function parsePacificDateTime(value){
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const raw = String(value).trim().replace(/\s+(?:PT|PST|PDT)$/i, '');
+  if (!raw) return null;
+  if (/([zZ]|[+-]\d{2}:?\d{2})$/.test(raw)) {
+    const zoned = new Date(raw);
+    return Number.isNaN(zoned.getTime()) ? null : zoned;
+  }
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2})(?::(\d{2}))?(?::(\d{2}))?)?$/);
+  if (m) {
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    const hour = Number(m[4] || 0);
+    const minute = Number(m[5] || 0);
+    const second = Number(m[6] || 0);
+    const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second);
+    let offset = pacificOffsetMinutes(new Date(utcGuess));
+    let actualMs = utcGuess - offset * 60000;
+    const resolvedOffset = pacificOffsetMinutes(new Date(actualMs));
+    if (resolvedOffset !== offset) actualMs = utcGuess - resolvedOffset * 60000;
+    const resolved = new Date(actualMs);
+    return Number.isNaN(resolved.getTime()) ? null : resolved;
+  }
+  const fallback = new Date(raw.replace(' ', 'T'));
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
 function nowPacific(){
-  // Returns current Date adjusted to Pacific (UTC-7 / UTC-8) via Intl
   return new Date();
 }
 
 function pacificMidnight(){
-  // Midnight of today in Pacific time
-  const now = new Date();
-  const pStr = now.toLocaleDateString('en-US', {timeZone:'America/Los_Angeles'});
-  return new Date(new Date(pStr).getTime());
+  return parsePacificDateTime(`${pacificDateKey(nowPacific())} 00:00:00`);
+}
+
+function addPacificDays(date, days){
+  const shifted = new Date(pacificDateValue(date) + days * 86400000);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getUTCDate()).padStart(2, '0');
+  return parsePacificDateTime(`${year}-${month}-${day} 00:00:00`);
+}
+
+function formatPacificTime(date){
+  return `${PACIFIC_TIME_FMT.format(date)} ${pacificZoneLabel(date)}`;
+}
+
+function formatPacificDate(date){
+  return PACIFIC_DATE_FMT.format(date);
+}
+
+function formatPacificDateTime(date){
+  return `${formatPacificDate(date)} ${formatPacificTime(date)}`;
+}
+
+function normalizeClockInput(value, fallback=''){
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) return fallback;
+  const m = raw.match(/^(\d{1,2})(?::?(\d{2}))?\s*([AP]M)?$/);
+  if (!m) return fallback;
+  let hour = Number(m[1]);
+  const minute = Number(m[2] || 0);
+  const meridiem = m[3] || '';
+  if (Number.isNaN(hour) || Number.isNaN(minute) || minute > 59) return fallback;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return fallback;
+    if (meridiem === 'AM') hour = hour === 12 ? 0 : hour;
+    if (meridiem === 'PM') hour = hour === 12 ? 12 : hour + 12;
+  } else if (hour > 23) {
+    return fallback;
+  }
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function formatClockInput(value, fallback=''){
+  const normalized = normalizeClockInput(value, fallback ? normalizeClockInput(fallback, '') : '');
+  if (!normalized) return fallback;
+  const [hourStr, minuteStr] = normalized.split(':');
+  const hour = Number(hourStr);
+  const minute = Number(minuteStr);
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
+}
+
+function clockInputValueForDate(date){
+  return formatClockInput(pacificTimeKey(date), '12:00 AM');
 }
 
 function getDateWindow(){
   // Returns {from: Date|null, to: Date|null} based on active date filter
   if(dateMode === 'absolute'){
-    const fd = $('abs-from-date').value, ft = $('abs-from-time').value||'00:00';
-    const td = $('abs-to-date').value,   tt = $('abs-to-time').value||'23:59';
-    const from = fd ? new Date(`${fd}T${ft}:00`) : null;
-    const to   = td ? new Date(`${td}T${tt}:59`) : null;
+    const fd = $('abs-from-date').value;
+    const ft = normalizeClockInput($('abs-from-time').value, '00:00') || '00:00';
+    const td = $('abs-to-date').value;
+    const tt = normalizeClockInput($('abs-to-time').value, '23:59') || '23:59';
+    const from = fd ? parsePacificDateTime(`${fd} ${ft}:00`) : null;
+    const to   = td ? parsePacificDateTime(`${td} ${tt}:59`) : null;
     return {from, to};
   }
-  const now = new Date();
+  const now = nowPacific();
   switch(quickFilter){
     case 'today':  return {from: pacificMidnight(), to: null};
     case '24h':    return {from: new Date(now - 24*3600*1000), to: null};
@@ -746,8 +914,7 @@ function getDateWindow(){
 }
 
 function parseSignalDate(ts){
-  if(!ts) return null;
-  try{ return new Date(ts.replace(' ','T')); } catch(e){ return null; }
+  return parsePacificDateTime(ts);
 }
 
 function applyDateFilter(sigs){
@@ -769,6 +936,7 @@ function toggleTradesOnly(){
   btn.classList.toggle('active', tradesOnly);
   btn.textContent = tradesOnly ? 'Trades only' : 'All signals';
   feedLimit = 30;
+  renderLiveSummaries();
   renderFeed();
 }
 
@@ -779,6 +947,7 @@ function setQuickFilter(q){
     b.classList.toggle('active', b.dataset.q === q);
   });
   feedLimit = 30;
+  renderLiveSummaries();
   renderFeed();
 }
 
@@ -790,12 +959,12 @@ function toggleDateMode(){
     qb.style.display = 'none';
     ar.classList.add('show');
     tog.textContent = 'switch to quick filters';
-    // Set defaults: From = today 00:00, To = now
-    const now   = new Date();
-    const today = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
-    const hhmm  = now.toTimeString().slice(0,5);
+    const now   = nowPacific();
+    const today = pacificDateKey(now);
+    const hhmm  = clockInputValueForDate(now);
     if(!$('abs-from-date').value) $('abs-from-date').value = today;
     if(!$('abs-to-date').value)   $('abs-to-date').value   = today;
+    if(!$('abs-from-time').value) $('abs-from-time').value = '12:00 AM';
     if(!$('abs-to-time').value)   $('abs-to-time').value   = hhmm;
   } else {
     qb.style.display = '';
@@ -803,6 +972,7 @@ function toggleDateMode(){
     tog.textContent = 'switch to date range';
   }
   feedLimit = 30;
+  renderLiveSummaries();
   renderFeed();
 }
 
@@ -811,9 +981,24 @@ let _absInputsInited = false;
 function _initAbsInputs(){
   if(_absInputsInited) return;
   _absInputsInited = true;
-  ['abs-from-date','abs-from-time','abs-to-date','abs-to-time'].forEach(id=>{
+  ['abs-from-date','abs-to-date'].forEach(id=>{
     const el = document.getElementById(id);
-    if(el) el.addEventListener('change', ()=>{ feedLimit=30; renderFeed(); });
+    if(el) el.addEventListener('change', ()=>{ feedLimit=30; renderLiveSummaries(); renderFeed(); });
+  });
+  [
+    ['abs-from-time', '12:00 AM'],
+    ['abs-to-time', '11:59 PM'],
+  ].forEach(([id, fallback])=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    const sync = ()=>{
+      el.value = formatClockInput(el.value, fallback);
+      feedLimit = 30;
+      renderLiveSummaries();
+      renderFeed();
+    };
+    el.addEventListener('change', sync);
+    el.addEventListener('blur', sync);
   });
 }
 
@@ -847,15 +1032,133 @@ function fmtNum(v,d=2){
   return isNaN(n)?'—':n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 }
 function fmtTime(ts){
-  if(!ts)return'—';
-  try{
-    const d=new Date(ts.replace(' ','T'));
-    const now=new Date();
-    const sameDay=d.toDateString()===now.toDateString();
-    if(sameDay) return d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-    return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+' '+
-           d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-  }catch(e){return esc(ts);}
+  const d = parseSignalDate(ts);
+  if(!d)return esc(ts||'—');
+  const now = nowPacific();
+  if(pacificDateKey(d) === pacificDateKey(now)) return formatPacificTime(d);
+  return formatPacificDateTime(d);
+}
+
+function fmtDateTime(ts){
+  const d = parseSignalDate(ts);
+  if(!d)return esc(ts||'—');
+  return formatPacificDateTime(d);
+}
+
+function getWindowMeta(){
+  if(dateMode === 'absolute'){
+    return {isAllTime:false, label:'Custom Range', capitalLabel:'Window P/L', tradeLabel:'Window Trades'};
+  }
+  switch(quickFilter){
+    case 'today':
+      return {isAllTime:false, label:'Today', capitalLabel:'Today P/L', tradeLabel:'Today Trades'};
+    case '24h':
+      return {isAllTime:false, label:'Last 24h', capitalLabel:'24h P/L', tradeLabel:'24h Trades'};
+    case '48h':
+      return {isAllTime:false, label:'Last 48h', capitalLabel:'48h P/L', tradeLabel:'48h Trades'};
+    case '7d':
+      return {isAllTime:false, label:'Last 7 days', capitalLabel:'7d P/L', tradeLabel:'7d Trades'};
+    default:
+      return {isAllTime:true, label:'All time', capitalLabel:'Total Capital', tradeLabel:'All-time Trades'};
+  }
+}
+
+function activeFeedLabel(){
+  return (FEED_TABS.find(t=>t.k===feedFilter) || {l:'All'}).l;
+}
+
+function activeCoinLabel(){
+  return coinFilter === 'all' ? 'All coins' : coinFilter;
+}
+
+function renderScopeBar(windowSignals, meta){
+  const bar = $('scope-bar');
+  if(!bar) return;
+  const activeSignals = coinFilter==='all' ? windowSignals : windowSignals.filter(s=>s.coin===coinFilter);
+  const tradeable = activeSignals.filter(s=>s.signal==='Buy'||s.signal==='Sell');
+  const closedTrades = tradeable.filter(s=>s.outcome==='W'||s.outcome==='L').length;
+  const openTradesCount = tradeable.filter(s=>s.outcome==='pending').length;
+  const skippedCount = activeSignals.filter(s=>s.signal==='Do Not Enter').length;
+  const modeLabel = tradesOnly ? 'Trades only' : 'All signals';
+  bar.innerHTML = `
+    <div class="scope-main">
+      <div>
+        <div class="scope-title">Current dashboard scope</div>
+        <div class="scope-desc">Top cards, alerts, and the signal log follow the selected focus. The 4 coin cards below stay aligned to the same time window for fast comparison.</div>
+      </div>
+      <div class="scope-chips">
+        <span class="scope-chip"><span class="scope-chip-label">Focus</span><span class="scope-chip-value">${activeCoinLabel()}</span></span>
+        <span class="scope-chip"><span class="scope-chip-label">Window</span><span class="scope-chip-value">${meta.label}</span></span>
+        <span class="scope-chip"><span class="scope-chip-label">Mode</span><span class="scope-chip-value">${modeLabel}</span></span>
+        <span class="scope-chip"><span class="scope-chip-label">Feed</span><span class="scope-chip-value">${activeFeedLabel()}</span></span>
+        <span class="scope-chip"><span class="scope-chip-label">Timezone</span><span class="scope-chip-value">12-hour PST</span></span>
+      </div>
+    </div>
+    <div class="scope-tip"><strong>${activeSignals.length}</strong> signals in scope, <strong>${closedTrades}</strong> closed trades, <strong>${openTradesCount}</strong> open trades, <strong>${skippedCount}</strong> skipped entries.</div>
+  `;
+}
+
+function sortClosedTrades(rows){
+  return [...rows].sort((a,b)=>{
+    const aClose = parseSignalDate(a.close_time) || parseSignalDate(a.timestamp) || new Date(0);
+    const bClose = parseSignalDate(b.close_time) || parseSignalDate(b.timestamp) || new Date(0);
+    if(aClose.getTime() !== bClose.getTime()) return aClose - bClose;
+    const aOpen = parseSignalDate(a.timestamp) || new Date(0);
+    const bOpen = parseSignalDate(b.timestamp) || new Date(0);
+    return aOpen - bOpen;
+  });
+}
+
+function replayCapital(tradeable, capitalStart){
+  let capital = capitalStart;
+  sortClosedTrades(tradeable.filter(s=>s.outcome==='W'||s.outcome==='L')).forEach(s=>{
+    if(s.outcome==='W') capital += s.reward_amount ? parseFloat(s.reward_amount) : capital * 0.03;
+    else if(s.outcome==='L') capital -= s.risk_amount ? parseFloat(s.risk_amount) : capital * 0.02;
+  });
+  return capital;
+}
+
+function buildSummaryCoinStats(windowSignals){
+  const baseByCoin = new Map((coinStats || []).map(c=>[c.coin, c]));
+  const coins = coinStats.length
+    ? coinStats.map(c=>c.coin)
+    : [...new Set(signals.map(s=>s.coin).filter(Boolean))].sort();
+  return coins.map(coin=>{
+    const base = baseByCoin.get(coin) || {coin};
+    const rows = windowSignals.filter(s=>s.coin===coin);
+    const tradeable = rows.filter(s=>s.signal==='Buy'||s.signal==='Sell');
+    const wins = tradeable.filter(s=>s.outcome==='W').length;
+    const losses = tradeable.filter(s=>s.outcome==='L').length;
+    const pendingRows = tradeable.filter(s=>s.outcome==='pending');
+    const capital = replayCapital(tradeable, 1000);
+    return {
+      ...base,
+      coin,
+      wins,
+      losses,
+      pending: pendingRows.length,
+      longs_open: pendingRows.filter(s=>(s.direction||'').toUpperCase()==='LONG' || s.signal==='Buy').length,
+      shorts_open: pendingRows.filter(s=>(s.direction||'').toUpperCase()==='SHORT' || s.signal==='Sell').length,
+      completed: wins + losses,
+      win_rate: wins + losses > 0 ? +(wins / (wins + losses) * 100).toFixed(1) : 0,
+      capital,
+      pnl: capital - 1000,
+      signals_total: rows.length,
+    };
+  });
+}
+
+function renderLiveSummaries(){
+  const windowSignals = applyDateFilter(signals);
+  const activeSignals = coinFilter==='all' ? windowSignals : windowSignals.filter(s=>s.coin===coinFilter);
+  stats = computeStatsJS(activeSignals);
+  const summaryCoinStats = buildSummaryCoinStats(windowSignals);
+  const windowMeta = getWindowMeta();
+  renderScopeBar(windowSignals, windowMeta);
+  const metricCoinStats = coinFilter==='all' ? summaryCoinStats : summaryCoinStats.filter(c=>c.coin===coinFilter);
+  renderMetrics(metricCoinStats, activeSignals, windowMeta);
+  renderCoinRow(summaryCoinStats, windowMeta);
+  renderAlerts(stats);
 }
 
 // ── Market API (served locally by dashboard backend) ────────────────────────
@@ -1036,47 +1339,55 @@ function renderHero(ticker){
 }
 
 // ── Render: Metrics Strip (4 summary cards) ──────────────────────────────────
-function renderMetrics(cs, sigs, pt){
+function renderMetrics(cs, sigs, meta){
   const totalCapital = cs.reduce((a,c)=>a+c.capital, 0);
   const totalOpen    = cs.reduce((a,c)=>a+c.pending, 0);
-  const pnl          = totalCapital - 4000;
-  const pnlSign      = pnl >= 0 ? '+' : '';
+  const capitalBaseline = 1000 * (cs.length || 4);
+  const pnl          = totalCapital - capitalBaseline;
+  const pnlSign      = pnl > 0 ? '+' : '';
   const pnlCol       = pnl > 0 ? '#00c805' : pnl < 0 ? '#ff3b30' : '#8e8e93';
 
-  // Win rate + trades: use all-time data from project_log if available
-  const atWins   = pt ? pt.all_time_wins   : cs.reduce((a,c)=>a+c.wins, 0);
-  const atLosses = pt ? pt.all_time_losses : cs.reduce((a,c)=>a+c.losses, 0);
-  const atWR     = pt ? pt.all_time_win_rate : (atWins+atLosses>0 ? atWins/(atWins+atLosses)*100 : 0);
-  const atTrades = pt ? pt.all_time_trades : (atWins + atLosses);
+  // Use canonical live analytics from the coin stats instead of project_log snapshots.
+  const atWins   = cs.reduce((a,c)=>a+c.wins, 0);
+  const atLosses = cs.reduce((a,c)=>a+c.losses, 0);
+  const atWR     = (atWins+atLosses>0 ? atWins/(atWins+atLosses)*100 : 0);
+  const atTrades = atWins + atLosses;
   const wrCol    = (atWins+atLosses)===0?'#8e8e93':atWR>=55?'#00c805':atWR>=45?'#ff9f0a':'#ff3b30';
+  const capitalValue = meta.isAllTime ? fmtUSD(totalCapital) : `${pnlSign}${fmtUSD(Math.abs(pnl))}`;
+  const capitalSub = meta.isAllTime ? `${pnlSign}${fmtUSD(Math.abs(pnl))} vs ${fmtUSD(capitalBaseline)} baseline` : `${meta.label} ${cs.length===1 ? activeCoinLabel() : 'across all coins'}`;
 
   $('metrics-strip').innerHTML = `
     <div class="met-card">
-      <div class="met-label">Total Capital</div>
-      <div class="met-val" style="color:${pnlCol}">${fmtUSD(totalCapital)}</div>
-      <div class="met-sub" style="color:${pnlCol}">${pnlSign}${fmtUSD(Math.abs(pnl))}</div>
+      <div class="met-label">${meta.capitalLabel}</div>
+      <div class="met-val" style="color:${pnlCol}">${capitalValue}</div>
+      <div class="met-sub" style="color:${meta.isAllTime ? pnlCol : 'var(--t2)'}">${capitalSub}</div>
+      <div class="met-hint">${meta.isAllTime ? (cs.length===1 ? 'Running capital for the focused coin.' : 'Portfolio total across ETH, SOL, AVAX, and XRP.') : 'Profit and loss for the active window only.'}</div>
     </div>
     <div class="met-card">
       <div class="met-label">Win Rate</div>
       <div class="met-val" style="color:${wrCol}">${(atWins+atLosses)>0?fmtNum(atWR,1)+'%':'—'}</div>
       <div class="met-sub">${atWins}w ${atLosses}l</div>
+      <div class="met-hint">Calculated from closed trades in the active scope.</div>
     </div>
     <div class="met-card">
       <div class="met-label">Open Trades</div>
       <div class="met-val" style="color:${totalOpen>0?'var(--amber)':'#8e8e93'}">${totalOpen}</div>
-      <div class="met-sub">across all coins</div>
+      <div class="met-sub">${meta.label} ${cs.length===1 ? activeCoinLabel() : 'across all coins'}</div>
+      <div class="met-hint">These trades are still live and not counted in win rate.</div>
     </div>
     <div class="met-card">
-      <div class="met-label">All-time Trades</div>
+      <div class="met-label">${meta.tradeLabel}</div>
       <div class="met-val">${atTrades}</div>
-      <div class="met-sub">${sigs.length} signals total</div>
+      <div class="met-sub">${sigs.length} signals in ${meta.label}</div>
+      <div class="met-hint">Signals include trades and skipped entries when visible.</div>
     </div>
   `;
-  $('hdr-portfolio').textContent = fmtUSD(totalCapital);
+  const liveCapital = (coinStats || []).reduce((a,c)=>a+(c.capital||0), 0);
+  $('hdr-portfolio').textContent = fmtUSD(liveCapital);
 }
 
 // ── Render: Coin Row (4 per-coin cards) ──────────────────────────────────────
-function renderCoinRow(cs){
+function renderCoinRow(cs, meta){
   $('coin-row').innerHTML = cs.map(c=>{
     const pnl      = c.capital - 1000;
     const capCol   = pnl > 0 ? '#00c805' : pnl < 0 ? '#ff3b30' : '#8e8e93';
@@ -1084,15 +1395,21 @@ function renderCoinRow(cs){
     const priceStr = c.current_price ? fmtUSD(c.current_price, c.current_price < 10 ? 4 : 2) : '—';
     const riskStr  = c.risk_per_trade   ? fmtUSD(c.risk_per_trade,   2) : fmtUSD(c.capital*0.02, 2);
     const rewStr   = c.reward_per_trade ? fmtUSD(c.reward_per_trade, 2) : fmtUSD(c.capital*0.03, 2);
-    return `<div class="coin-card" onclick="setCoinFilter('${c.coin}')">
+    const primaryLabel = meta.isAllTime ? 'Capital' : `${meta.label} P/L`;
+    const primaryValue = meta.isAllTime ? fmtUSD(c.capital) : `${pnl>0?'+':pnl<0?'-':''}${fmtUSD(Math.abs(pnl))}`;
+    const isActive = coinFilter === c.coin;
+    return `<div class="coin-card${isActive?' active':''}" onclick="setCoinFilter('${c.coin}')">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
-        <span class="coin-badge coin-${c.coin.toLowerCase()}">${c.coin}</span>
+        <div>
+          <div class="coin-card-kicker">${isActive ? 'Focused coin' : 'Click to focus'}</div>
+          <span class="coin-badge coin-${c.coin.toLowerCase()}">${c.coin}</span>
+        </div>
         <span style="font-size:13px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums">${priceStr}</span>
       </div>
       <div style="display:flex;justify-content:space-between;margin-bottom:4px">
         <div>
-          <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Capital</div>
-          <div class="cc-capital" style="font-size:16px;color:${capCol}">${fmtUSD(c.capital)}</div>
+          <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">${primaryLabel}</div>
+          <div class="cc-capital" style="font-size:16px;color:${capCol}">${primaryValue}</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">W/L</div>
@@ -1119,6 +1436,7 @@ function renderCoinRow(cs){
           <div style="font-size:11px;font-family:var(--mono);color:var(--green)">${rewStr} (3%)</div>
         </div>
       </div>
+      <div class="coin-card-tip">${isActive ? 'This coin is driving the chart, alerts, and feed below.' : 'Tap to narrow the whole dashboard to this coin.'}</div>
     </div>`;
   }).join('');
 }
@@ -1129,11 +1447,7 @@ function setCoinFilter(coin){
   document.querySelectorAll('.coin-btn').forEach(b=>{
     b.classList.toggle('active', b.dataset.coin===coin);
   });
-  const filtered = coinFilter==='all' ? signals : signals.filter(s=>s.coin===coinFilter);
-  const st = computeStatsJS(filtered);
-  renderMetrics(coinStats, signals, projectTotals);
-  renderCoinRow(coinStats);
-  renderAlerts(st);
+  renderLiveSummaries();
   renderFeed();
   refreshMarketView();
 }
@@ -1167,6 +1481,7 @@ function computeStatsJS(sigs){
     capital,
     win_rate: completed>0?(wins/completed*100):0,
     wins, losses,
+    pending_trades: pending.length,
     pending_buys: pending.length,
     total_signals: sigs.length,
     total_completed: completed,
@@ -1187,8 +1502,8 @@ function renderAlerts(st){
     a.push(`<div class="alert alert-danger">Win rate ${fmtNum(st.win_rate,1)}% is below 45% — strategy needs review</div>`);
   else if(st.total_completed>=10&&st.win_rate<55)
     a.push(`<div class="alert alert-warn">Win rate ${fmtNum(st.win_rate,1)}% is in the caution zone (45–55%)</div>`);
-  if(st.pending_buys>1)
-    a.push(`<div class="alert alert-warn">${st.pending_buys} open Buy positions — single-trade gate may be off</div>`);
+  if((st.pending_trades||0)>1)
+    a.push(`<div class="alert alert-warn">${st.pending_trades} open trade positions — review concurrency and gate behavior</div>`);
   w.innerHTML=a.join('');
 }
 
@@ -1211,7 +1526,7 @@ function renderFeedTabs(){
   ).join('');
 }
 
-function setFeedFilter(k){feedFilter=k;feedLimit=30;renderFeedTabs();renderFeed();}
+function setFeedFilter(k){feedFilter=k;feedLimit=30;renderLiveSummaries();renderFeedTabs();renderFeed();}
 
 // Build the filtered+sorted row array used by both renderFeed and openModal
 function _buildFeedRows(){
@@ -1232,16 +1547,20 @@ function renderFeed(){
   const tradesInWindow = totalAfterDate.filter(s=>s.signal==='Buy'||s.signal==='Sell');
   const dneHidden      = tradesOnly ? totalAfterDate.filter(s=>s.signal==='Do Not Enter').length : 0;
   const coinCount      = [...new Set(rows.map(s=>s.coin).filter(Boolean))].length;
+  const subtitle = $('feed-subtitle');
+  if(subtitle){
+    subtitle.textContent = `Showing ${activeFeedLabel().toLowerCase()} entries for ${activeCoinLabel()} in ${getWindowMeta().label}. Times are displayed in 12-hour PST.`;
+  }
 
   // Signal count line
   const countEl = $('sig-count');
   if(countEl){
     if(rows.length===0){
-      countEl.textContent = 'No signals in this window';
+      countEl.textContent = `No entries matched ${activeCoinLabel()} in ${getWindowMeta().label}.`;
     } else {
-      const tradeWord = rows.length===1?'trade':'trades';
+      const labelWord = tradesOnly ? (rows.length===1?'trade':'trades') : (rows.length===1?'signal':'signals');
       const coinWord  = coinCount===1?'coin':'coins';
-      let txt = `Showing ${rows.length} ${tradeWord} across ${coinCount} ${coinWord}`;
+      let txt = `Showing ${rows.length} ${labelWord} across ${coinCount} ${coinWord} in ${getWindowMeta().label}`;
       if(dneHidden>0) txt += ` (${dneHidden} DNE signal${dneHidden===1?'':'s'} hidden)`;
       countEl.textContent = txt;
     }
@@ -1251,12 +1570,15 @@ function renderFeed(){
   const el = $('feed-list');
 
   if(!slice.length){
-    el.innerHTML='<div style="text-align:center;padding:32px;color:var(--t2);font-size:13px">No signals</div>';
+    el.innerHTML=`<div class="feed-empty">
+      <div class="feed-empty-title">No entries in this view</div>
+      <div class="feed-empty-copy">Try widening the time window, switching to another coin, or turning off Trades only if you want to include skipped entries.</div>
+    </div>`;
     return;
   }
 
   let html=`<table class="sig-table"><thead><tr>
-    <th>Time</th><th>Coin</th><th>Signal</th><th>Confidence</th><th>Outcome</th><th>Duration</th>
+    <th>Time (PST)</th><th>Coin</th><th>Signal</th><th>Confidence</th><th>Outcome</th><th>Duration</th>
   </tr></thead><tbody>`;
 
   html+=slice.map((s,i)=>{
@@ -1298,7 +1620,7 @@ function renderFeed(){
         const d=fmtDuration(s.timestamp,s.close_time);
         durCell=d?`<td class="dur-closed" style="font-family:var(--mono)">${d}</td>`:'<td style="color:var(--t2);font-family:var(--mono)">—</td>';
       } else if(s.outcome==='pending'){
-        const d=fmtDuration(s.timestamp,new Date().toISOString().replace('T',' ').slice(0,19));
+        const d=fmtDuration(s.timestamp,nowPacific());
         durCell=d?`<td class="dur-open" style="font-family:var(--mono)">${d}</td>`:'<td style="color:var(--t2);font-family:var(--mono)">—</td>';
       }
     }
@@ -1337,7 +1659,7 @@ function openModal(idx){
   const slHint=isSell?'above entry':'below entry';
   const tpHint=isSell?'below entry':'above entry';
   const kv=[
-    ['Time',fmtTime(s.timestamp),true],
+    ['Time',fmtDateTime(s.timestamp),true],
     ['Direction',s.direction||(s.signal==='Buy'?'LONG':s.signal==='Sell'?'SHORT':'—'),true],
     ['Confidence',conf>0?conf+'%':'—',true],
     ['Entry',fmtUSD(s.entry_price),true],
@@ -1345,7 +1667,7 @@ function openModal(idx){
     ['Take Profit',s.take_profit?fmtUSD(s.take_profit)+' ('+tpHint+')':'—',true],
     ['Outcome',s.outcome||'—',true],
     ['Close Price',fmtUSD(s.close_price),true],
-    ['Close Time',s.close_time||'—',true],
+    ['Close Time',fmtDateTime(s.close_time),true],
   ];
   const prose=[
     ['Rationale',s.decision_rationale],
@@ -1407,9 +1729,6 @@ async function loadAll(){
   if(ticker) livePrice = ticker.price;
   if(candles.length) periodOpen = candles[0].o;
 
-  const filtered = coinFilter==='all' ? signals : signals.filter(s=>s.coin===coinFilter);
-  stats = computeStatsJS(filtered);
-
   $('loading').style.display='none';
   $('app').style.display='block';
 
@@ -1418,9 +1737,7 @@ async function loadAll(){
   const chartTrade = openTrades.find(t=>coinFilter==='all'||t.coin===coinFilter)||null;
   renderHero(ticker);
   drawChart(candles, chartTrade);
-  renderMetrics(coinStats, signals, projectTotals);
-  renderCoinRow(coinStats);
-  renderAlerts(stats);
+  renderLiveSummaries();
   renderFeedTabs();
   renderFeed();
 }
@@ -1434,9 +1751,10 @@ async function refreshPrice(){
 function startCountdown(){
   countdown=REFRESH;
   clearInterval(cdTimer);
+  $('hdr-countdown').textContent=`Refresh in ${countdown}s`;
   cdTimer=setInterval(async ()=>{
     countdown--;
-    $('hdr-countdown').textContent=countdown+'s';
+    $('hdr-countdown').textContent=`Refresh in ${countdown}s`;
     if(countdown%10===0) refreshPrice(); // partial refresh every 10s
     if(countdown<=0){ countdown=REFRESH; await loadAll(); if(currentTab==='golive') loadGoLive(); }
   },1000);
@@ -1486,14 +1804,24 @@ function renderProjectStatus(data) {
   $('ps-loading').style.display = 'none';
   $('ps-content').style.display = 'block';
 
-  const t = data.totals;
-  const sessions = data.sessions;
-  const sidx = data.current_session - 1;
-  const sess = sessions[sidx];
-  const thresholds = data.success_thresholds;
-  const milestones = data.milestones;
+  const live = data.live_summary || {};
+  const portfolio = live.portfolio || {};
+  const sessions = Array.isArray(data.sessions) ? data.sessions : [];
+  const sidx = Math.max(0, (data.current_session || 1) - 1);
+  const sessMeta = sessions[sidx] || {session: data.current_session || 1, date_start: '—', date_end: '—', settings: {}, results: {}};
+  const sess = data.session_stats || {};
+  const thresholds = data.success_thresholds || {};
+  const milestones = data.milestones || {};
+  const totals = data.totals || {};
 
-  const wrCol = t.all_time_win_rate >= 60 ? 'var(--green)' : t.all_time_win_rate >= 45 ? 'var(--amber)' : 'var(--red)';
+  const liveWins = portfolio.wins || 0;
+  const liveLosses = portfolio.losses || 0;
+  const liveTrades = portfolio.total_completed || 0;
+  const liveWR = portfolio.win_rate || 0;
+  const trackedPeakCapital = totals.peak_capital || sess.capital_end || portfolio.capital || 0;
+  const currentSignalsPerDay = (live.signals_per_day && live.signals_per_day.average_per_day) || 0;
+  const sessionsRun = totals.sessions_run || data.current_session || sessions.length || 1;
+  const wrCol = liveWR >= 60 ? 'var(--green)' : liveWR >= 45 ? 'var(--amber)' : 'var(--red)';
 
   const MILESTONE_LABELS = {
     engine_running:        'Engine running',
@@ -1510,15 +1838,14 @@ function renderProjectStatus(data) {
     live_trading:          'Live trading started',
   };
 
-  const currentSignalsPerDay = 4;
-
   function progBar(current, target, label, unit='') {
-    const pct = Math.min(100, Math.round(current / target * 100));
+    const safeTarget = target || 1;
+    const pct = Math.min(100, Math.round(current / safeTarget * 100));
     const done = pct >= 100;
     return `<div class="ps-prog-item">
       <div class="ps-prog-header">
         <span class="ps-prog-label">${label}</span>
-        <span class="ps-prog-nums">${current}${unit} / ${target}${unit}</span>
+        <span class="ps-prog-nums">${current}${unit} / ${safeTarget}${unit}</span>
       </div>
       <div class="ps-prog-track">
         <div class="ps-prog-fill${done?' done':''}" style="width:${pct}%"></div>
@@ -1527,43 +1854,48 @@ function renderProjectStatus(data) {
   }
 
   const html = `
+    <div class="tab-intro">
+      <div class="tab-intro-title">How to read Project</div>
+      <div class="tab-intro-copy">This page is your long-horizon status view: all-time performance, the current session setup, milestone completion, and progress toward paper-trading goals.</div>
+    </div>
+
     <!-- Section 1: Metric cards -->
     <div class="ps-section">
       <div class="ps-section-title">All Time Performance</div>
       <div class="ps-cards">
         <div class="ps-card">
           <div class="ps-card-label">Win Rate</div>
-          <div class="ps-card-val" style="color:${wrCol}">${t.all_time_win_rate}%</div>
-          <div class="ps-card-sub">${t.all_time_wins}W / ${t.all_time_losses}L</div>
+          <div class="ps-card-val" style="color:${wrCol}">${fmtNum(liveWR,1)}%</div>
+          <div class="ps-card-sub">${liveWins}W / ${liveLosses}L</div>
         </div>
         <div class="ps-card">
           <div class="ps-card-label">Total Trades</div>
-          <div class="ps-card-val">${t.all_time_trades}</div>
-          <div class="ps-card-sub">${data.sessions_run || data.current_session} sessions</div>
+          <div class="ps-card-val">${liveTrades}</div>
+          <div class="ps-card-sub">${sessionsRun} sessions tracked</div>
         </div>
         <div class="ps-card">
           <div class="ps-card-label">Peak Capital</div>
-          <div class="ps-card-val" style="color:var(--green)">${fmtUSD(t.peak_capital)}</div>
-          <div class="ps-card-sub">All time high</div>
+          <div class="ps-card-val" style="color:var(--green)">${fmtUSD(trackedPeakCapital)}</div>
+          <div class="ps-card-sub">Best tracked portfolio total</div>
         </div>
         <div class="ps-card">
           <div class="ps-card-label">Session Capital</div>
-          <div class="ps-card-val">${fmtUSD(sess.results.capital_end)}</div>
-          <div class="ps-card-sub">Started ${fmtUSD(sess.results.capital_start)}</div>
+          <div class="ps-card-val">${fmtUSD(sess.capital_end || sessMeta.results.capital_end)}</div>
+          <div class="ps-card-sub">Started ${fmtUSD(sess.capital_start || sessMeta.results.capital_start)}</div>
         </div>
       </div>
     </div>
 
     <!-- Section 2: Current session -->
     <div class="ps-section">
-      <div class="ps-section-title">Session ${sess.session} — ${sess.date_start} to ${sess.date_end}</div>
+      <div class="ps-section-title">Session ${sessMeta.session} — ${sessMeta.date_start} to ${sessMeta.date_end}</div>
       <div class="ps-info-grid">
-        <div class="ps-info-block"><div class="ps-info-label">Coins</div><div class="ps-info-val">${Array.isArray(sess.settings.coins)?sess.settings.coins.join(' / '):sess.settings.coin||'—'}</div></div>
-        <div class="ps-info-block"><div class="ps-info-label">Confidence Threshold</div><div class="ps-info-val">${sess.settings.threshold}%</div></div>
-        <div class="ps-info-block"><div class="ps-info-label">Reward : Risk</div><div class="ps-info-val">${sess.settings.reward_risk}</div></div>
-        <div class="ps-info-block"><div class="ps-info-label">Cycle Minutes</div><div class="ps-info-val">${sess.settings.cycle_minutes} min</div></div>
-        <div class="ps-info-block"><div class="ps-info-label">Session Trades</div><div class="ps-info-val">${sess.results.trades} &nbsp;(${sess.results.wins}W / ${sess.results.losses}L)</div></div>
-        <div class="ps-info-block"><div class="ps-info-label">Session Win Rate</div><div class="ps-info-val">${sess.results.win_rate}%</div></div>
+        <div class="ps-info-block"><div class="ps-info-label">Coins</div><div class="ps-info-val">${Array.isArray(sessMeta.settings.coins)?sessMeta.settings.coins.join(' / '):sessMeta.settings.coin||'—'}</div></div>
+        <div class="ps-info-block"><div class="ps-info-label">Confidence Threshold</div><div class="ps-info-val">${sessMeta.settings.threshold||'—'}%</div></div>
+        <div class="ps-info-block"><div class="ps-info-label">Reward : Risk</div><div class="ps-info-val">${sessMeta.settings.reward_risk||'—'}</div></div>
+        <div class="ps-info-block"><div class="ps-info-label">Cycle Minutes</div><div class="ps-info-val">${sessMeta.settings.cycle_minutes||'—'} min</div></div>
+        <div class="ps-info-block"><div class="ps-info-label">Session Trades</div><div class="ps-info-val">${sess.trades||0} &nbsp;(${sess.wins||0}W / ${sess.losses||0}L)</div></div>
+        <div class="ps-info-block"><div class="ps-info-label">Session Win Rate</div><div class="ps-info-val">${fmtNum(sess.win_rate||0,1)}%</div></div>
       </div>
     </div>
 
@@ -1584,10 +1916,10 @@ function renderProjectStatus(data) {
     <div class="ps-section">
       <div class="ps-section-title">Progress to Live Trading</div>
       <div class="ps-progress-list">
-        ${progBar(t.all_time_win_rate, thresholds.win_rate_to_go_live, 'Win Rate', '%')}
-        ${progBar(t.all_time_trades, thresholds.min_trades_to_go_live, 'Total Trades')}
-        ${progBar(sess.results.capital_end, thresholds.target_capital, 'Session Capital', '')}
-        ${progBar(currentSignalsPerDay, thresholds.target_signals_per_day, 'Signals per Day')}
+        ${progBar(liveWR, thresholds.win_rate_to_go_live || 60, 'Win Rate', '%')}
+        ${progBar(liveTrades, thresholds.min_trades_to_go_live || 50, 'Total Trades')}
+        ${progBar(sess.capital_end || sessMeta.results.capital_end || 0, thresholds.target_capital || 6000, 'Session Capital', '')}
+        ${progBar(currentSignalsPerDay, thresholds.target_signals_per_day || 15, 'Signals per Day')}
       </div>
     </div>
   `;
@@ -1613,24 +1945,29 @@ function renderGoLive(d) {
   $('gl-loading').style.display = 'none';
   $('gl-content').style.display = 'block';
 
-  const gl   = d.go_live_criteria;
-  const tot  = d.totals;
-  const sigs = d.live_stats;
+  const gl   = d.go_live_criteria || {};
+  const live = d.live_summary || {};
+  const portfolio = live.portfolio || {};
+  const coinStats = portfolio.coin_stats || [];
+  const sigs = d.live_stats || {};
 
   // ── Computed values ────────────────────────────────────────────────────────
-  const winRate   = sigs.win_rate;
-  const trades    = sigs.total_trades;
-  const startDate = new Date(gl.paper_trading_start);
-  const today     = new Date();
-  const paperDays = Math.max(0, Math.floor((today - startDate) / 86400000));
+  const winRate   = sigs.win_rate || 0;
+  const trades    = sigs.total_trades || 0;
+  const startDate = parseSignalDate(gl.paper_trading_start || d.started) || nowPacific();
+  const today     = nowPacific();
+  const paperDays = Math.max(0, Math.floor((pacificDateValue(today) - pacificDateValue(startDate)) / 86400000));
   const stableDays = gl.current_stable_days || 0;
+  const tradesTarget = gl.min_trades_total || 200;
+  const paperDaysTarget = gl.min_paper_days || 21;
+  const stableDaysTarget = gl.stable_days_needed || 7;
+  const profitableCoinsTarget = gl.coins_profitable_needed || 4;
+  const drawdownTarget = gl.max_drawdown_pct || 15;
+  const totalCriteria = 9;
 
-  // Coins profitable = coins where per_coin capital > 1000
-  const perCoin = tot.per_coin || {};
-  const coinsProfitable = Object.values(perCoin).filter(c => c.capital > 1000).length;
+  const coinsProfitable = live.profitable_coins || coinStats.filter(c => c.capital > 1000).length;
 
-  // Max drawdown per coin (simple: lowest capital / 1000 - 1)
-  const maxDrawdown = Math.max(0, ...Object.values(perCoin).map(c => Math.max(0, (1000 - c.capital) / 1000 * 100)));
+  const maxDrawdown = live.max_drawdown_pct || 0;
 
   // Criteria evaluation
   const criteria = [
@@ -1638,21 +1975,21 @@ function renderGoLive(d) {
       label: 'Win rate above 60% sustained',
       value: winRate.toFixed(1) + '%',
       target: '≥ 60%',
-      pass: winRate >= 60,
+      pass: winRate >= (gl.win_rate_target || 60),
       close: winRate >= 55,
     },
     {
-      label: '200+ completed trades',
+      label: `${tradesTarget}+ completed trades`,
       value: trades,
-      target: '≥ 200',
-      pass: trades >= 200,
+      target: `≥ ${tradesTarget}`,
+      pass: trades >= tradesTarget,
       close: trades >= 150,
     },
     {
-      label: '7 consecutive stable days',
+      label: `${stableDaysTarget} consecutive stable days`,
       value: stableDays + ' days',
-      target: '7 days',
-      pass: stableDays >= 7,
+      target: `${stableDaysTarget} days`,
+      pass: stableDays >= stableDaysTarget,
       close: stableDays >= 4,
     },
     {
@@ -1670,17 +2007,17 @@ function renderGoLive(d) {
       close: false,
     },
     {
-      label: 'All 4 coins profitable',
-      value: coinsProfitable + ' / 4',
-      target: '4 coins',
-      pass: coinsProfitable >= 4,
+      label: `All ${profitableCoinsTarget} tracked coins profitable`,
+      value: coinsProfitable + ` / ${profitableCoinsTarget}`,
+      target: `${profitableCoinsTarget} coins`,
+      pass: coinsProfitable >= profitableCoinsTarget,
       close: coinsProfitable >= 3,
     },
     {
-      label: 'Max drawdown below 15% per coin',
+      label: `Max drawdown below ${drawdownTarget}% per coin`,
       value: maxDrawdown.toFixed(1) + '%',
-      target: '< 15%',
-      pass: maxDrawdown < 15,
+      target: `< ${drawdownTarget}%`,
+      pass: maxDrawdown < drawdownTarget,
       close: maxDrawdown < 20,
     },
     {
@@ -1700,7 +2037,7 @@ function renderGoLive(d) {
   ];
 
   const passingCount = criteria.filter(c => c.pass).length;
-  const total9 = criteria.length;
+  const total9 = criteria.length || totalCriteria;
 
   // Verdict
   let verdictClass, verdictText;
@@ -1713,27 +2050,28 @@ function renderGoLive(d) {
   }
 
   // Per-coin capital rows
-  const coinCapRows = Object.entries(perCoin).map(([name, pc]) => {
-    const riskAmt = (pc.capital * 0.02).toFixed(2);
+  const coinCapRows = coinStats.map(pc => {
+    const riskAmt = (pc.risk_per_trade || pc.capital * 0.02).toFixed(2);
     const pnl = pc.capital - 1000;
     const col = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--t2)';
     return `<div class="gl-cap-block">
-      <div class="gl-cap-label">${name}</div>
+      <div class="gl-cap-label">${pc.coin}</div>
       <div class="gl-cap-val" style="color:${col}">${fmtUSD(pc.capital)}</div>
       <div style="font-size:11px;color:var(--t2);margin-top:2px">Risk/trade: $${riskAmt} (2%)</div>
     </div>`;
   }).join('');
 
-  const totalCapital = Object.values(perCoin).reduce((a, c) => a + c.capital, 0);
-  const maxSimRisk   = Object.values(perCoin).reduce((a, c) => a + c.capital * 0.02 * 2, 0); // 2 positions per coin
+  const totalCapital = portfolio.capital || coinStats.reduce((a, c) => a + c.capital, 0);
+  const maxSimRisk   = coinStats.reduce((a, c) => a + (c.risk_per_trade || c.capital * 0.02) * 2, 0); // 2 positions per coin
 
   function glBar(current, target, label, unit='') {
-    const pct = Math.min(100, Math.round(current / target * 100));
+    const safeTarget = target || 1;
+    const pct = Math.min(100, Math.round(current / safeTarget * 100));
     const done = pct >= 100;
     return `<div class="gl-prog-item">
       <div class="gl-prog-header">
         <span class="gl-prog-label">${label}</span>
-        <span class="gl-prog-nums">${current}${unit} / ${target}${unit}</span>
+        <span class="gl-prog-nums">${current}${unit} / ${safeTarget}${unit}</span>
       </div>
       <div class="gl-prog-track">
         <div class="gl-prog-fill${done?' done':''}" style="width:${pct}%"></div>
@@ -1742,12 +2080,16 @@ function renderGoLive(d) {
   }
 
   // Timeline
-  const week1End   = new Date(startDate); week1End.setDate(week1End.getDate() + 7);
-  const week2End   = new Date(startDate); week2End.setDate(week2End.getDate() + 14);
-  const week3End   = new Date(startDate); week3End.setDate(week3End.getDate() + 21);
-  const goLiveDate = new Date(startDate); goLiveDate.setDate(goLiveDate.getDate() + 30);
-  function fmtDate(d){ return d.toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
-  function tlDot(d){ return today>d?'gl-tl-dot-done':today>=new Date(d.getTime()-86400000)?'gl-tl-dot-active':'gl-tl-dot-future'; }
+  const week1End   = addPacificDays(startDate, 7);
+  const week2End   = addPacificDays(startDate, 14);
+  const week3End   = addPacificDays(startDate, 21);
+  const goLiveDate = addPacificDays(startDate, 30);
+  const todayValue = pacificDateValue(today);
+  function fmtDate(d){ return formatPacificDate(d); }
+  function tlDot(d){
+    const target = pacificDateValue(d);
+    return todayValue > target ? 'gl-tl-dot-done' : todayValue >= (target - 86400000) ? 'gl-tl-dot-active' : 'gl-tl-dot-future';
+  }
 
   const timeline = [
     {label:'Paper trading started', date: fmtDate(startDate), cls: 'gl-tl-dot-done'},
@@ -1758,6 +2100,11 @@ function renderGoLive(d) {
   ];
 
   $('gl-content').innerHTML = `
+    <div class="tab-intro">
+      <div class="tab-intro-title">How to read Readiness</div>
+      <div class="tab-intro-copy">Use this page to decide whether the system is operationally ready for live trading. PASS means the target is met now, CLOSE means nearly there, and NOT YET highlights the next blocker.</div>
+    </div>
+
     <!-- Row 1: Metric cards -->
     <div class="gl-section">
       <div class="gl-section-title">Go-Live Summary</div>
@@ -1774,8 +2121,8 @@ function renderGoLive(d) {
         </div>
         <div class="gl-metric-card">
           <div class="gl-metric-label">Paper Days</div>
-          <div class="gl-metric-val" style="color:${paperDays>=21?'var(--green)':paperDays>=14?'var(--amber)':'var(--t1)'}">${paperDays}</div>
-          <div class="gl-metric-sub">target ≥ 21 days</div>
+          <div class="gl-metric-val" style="color:${paperDays>=paperDaysTarget?'var(--green)':paperDays>=14?'var(--amber)':'var(--t1)'}">${paperDays}</div>
+          <div class="gl-metric-sub">target ≥ ${paperDaysTarget} days</div>
         </div>
         <div class="gl-metric-card">
           <div class="gl-metric-label">Criteria Passing</div>
@@ -1810,10 +2157,10 @@ function renderGoLive(d) {
     <div class="gl-section">
       <div class="gl-section-title">Progress</div>
       <div class="gl-progress-list">
-        ${glBar(trades, 200, 'Trades completed')}
-        ${glBar(paperDays, 21, 'Paper trading days')}
-        ${glBar(stableDays, 7, 'Consecutive stable days')}
-        ${glBar(coinsProfitable, 4, 'Coins profitable')}
+        ${glBar(trades, tradesTarget, 'Trades completed')}
+        ${glBar(paperDays, paperDaysTarget, 'Paper trading days')}
+        ${glBar(stableDays, stableDaysTarget, 'Consecutive stable days')}
+        ${glBar(coinsProfitable, profitableCoinsTarget, 'Coins profitable')}
         ${glBar(passingCount, total9, 'Criteria passing')}
       </div>
     </div>
@@ -1889,6 +2236,10 @@ function renderLearnings() {
   $('lr-content').style.display = 'block';
   const COINS_ORDER = ['ETH','SOL','XRP','AVAX'];
   $('lr-content').innerHTML = `
+    <div class="tab-intro">
+      <div class="tab-intro-title">How to read Learnings</div>
+      <div class="tab-intro-copy">This page summarizes what the learner thinks is working for each coin. Favor setups are historically strong, caution setups are mixed, and avoid setups are currently underperforming.</div>
+    </div>
     <div class="lr-coin-filter">
       ${COINS_ORDER.map(c => `<button class="lr-coin-btn${c===lrCoin?' active':''}" data-coin="${c}" onclick="setLrCoin('${c}')">${c}</button>`).join('')}
     </div>
@@ -1922,7 +2273,30 @@ function renderLearningsCard() {
     return 'lr-wr-red';
   }
 
+  const positivePatterns = patterns.filter(p => (p.win_rate || 0) >= 70).length;
+  const cautionPatterns = patterns.filter(p => (p.win_rate || 0) < 40).length;
+
   const patternsHtml = patterns.length ? `
+    <div class="lr-summary-grid">
+      <div class="lr-stat">
+        <div class="lr-stat-label">Patterns tracked</div>
+        <div class="lr-stat-value">${patterns.length}</div>
+      </div>
+      <div class="lr-stat">
+        <div class="lr-stat-label">Favor setups</div>
+        <div class="lr-stat-value" style="color:var(--green)">${positivePatterns}</div>
+      </div>
+      <div class="lr-stat">
+        <div class="lr-stat-label">Caution / Avoid</div>
+        <div class="lr-stat-value" style="color:var(--amber)">${cautionPatterns}</div>
+      </div>
+    </div>
+    <div class="lr-legend">
+      <span class="lr-legend-item"><span class="lr-badge lr-badge-favor">FAVOR</span> Prioritize these setups</span>
+      <span class="lr-legend-item"><span class="lr-badge lr-badge-neutral">NEUTRAL</span> Tradeable but not strong</span>
+      <span class="lr-legend-item"><span class="lr-badge lr-badge-caution">CAUTION</span> Needs extra confirmation</span>
+      <span class="lr-legend-item"><span class="lr-badge lr-badge-avoid">AVOID</span> Underperforming right now</span>
+    </div>
     <table class="lr-table">
       <thead><tr>
         <th>Signal</th><th>Condition</th><th>W</th><th>L</th><th>Win Rate</th><th>Conf</th><th>Recommendation</th>
@@ -1946,7 +2320,7 @@ function renderLearningsCard() {
       <thead><tr><th>Time</th><th>Trades</th><th>WR</th><th>Summary</th></tr></thead>
       <tbody>
         ${[...hist].reverse().slice(0,20).map(h=>`<tr>
-          <td>${h.timestamp||''}</td>
+          <td>${fmtDateTime(h.timestamp)}</td>
           <td>${h.trade_count||''}</td>
           <td>${h.overall_win_rate!=null?h.overall_win_rate+'%':''}</td>
           <td>${h.summary||''}</td>
@@ -1957,7 +2331,7 @@ function renderLearningsCard() {
   area.innerHTML = `<div class="lr-card">
     <div class="lr-card-header">
       <span class="lr-coin-name">${lrCoin}</span>
-      <span class="lr-meta">Last updated: ${cur.generated_at||'—'}</span>
+      <span class="lr-meta">Last updated: ${fmtDateTime(cur.generated_at)}</span>
       <span class="lr-meta">${cur.trade_count||0} trades analyzed</span>
       <span class="lr-meta">${cur.overall_win_rate!=null?cur.overall_win_rate+'%':''} overall WR</span>
     </div>
@@ -1995,12 +2369,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
         elif parsed.path == "/api/data":
-            query     = parse_qs(parsed.query)
+            query = parse_qs(parsed.query)
             coin_filter = query.get("coin", ["all"])[0]
-            sigs = read_signals()
+            rows_by_coin = dm.load_rows_by_coin()
+            all_signals = dm.get_all_signals(rows_by_coin=rows_by_coin)
+            sigs = all_signals
             if coin_filter != "all":
                 sigs = [s for s in sigs if s.get("coin") == coin_filter]
-            st   = compute_stats(sigs)
+            portfolio_stats = dm.get_portfolio_stats(rows_by_coin=rows_by_coin)
+            st = portfolio_stats if coin_filter == "all" else compute_stats(sigs)
+            if coin_filter != "all":
+                filtered_open = [row for row in portfolio_stats.get("open_trades", []) if row.get("coin") == coin_filter]
+                st["open_trades"] = filtered_open
+                st["open_trade"] = filtered_open[-1] if filtered_open else None
             project_totals = None
             try:
                 log_path = os.path.join(_BASE, "project_log.json")
@@ -2008,6 +2389,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     project_totals = json.load(f).get("totals")
             except Exception:
                 pass
+            live_summary = dm.get_live_summary(rows_by_coin=rows_by_coin)
             payload = json.dumps(
                 {
                     "signals":          sigs,
@@ -2015,6 +2397,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "starting_capital": COIN_CAPITAL_START * 4,
                     "updated":          datetime.now().isoformat(),
                     "project_totals":   project_totals,
+                    "live_summary":     live_summary,
                 },
                 default=str,
             ).encode("utf-8")
@@ -2041,10 +2424,25 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
 
         elif parsed.path == "/api/coins":
-            coin_stats = [
-                compute_coin_stats(name, path)
-                for name, path in COIN_CSV_FILES.items()
-            ]
+            rows_by_coin = dm.load_rows_by_coin()
+            coin_stats = dm.get_all_coin_stats(rows_by_coin=rows_by_coin)
+            for coin_stat in coin_stats:
+                current_price = fetch_coin_price(coin_stat["coin"])
+                if not current_price:
+                    for row in reversed(rows_by_coin.get(coin_stat["coin"], [])):
+                        for field in ("close_price", "entry_price"):
+                            val = row.get(field)
+                            if val and str(val).strip() not in ("", "None", "nan"):
+                                try:
+                                    price = float(val)
+                                    if price > 0:
+                                        current_price = price
+                                        break
+                                except (ValueError, TypeError):
+                                    pass
+                        if current_price:
+                            break
+                coin_stat["current_price"] = current_price
             payload = json.dumps({"ok": True, "coins": coin_stats}, default=str).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -2057,24 +2455,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 log_path = os.path.join(_BASE, "project_log.json")
                 with open(log_path, "r") as f:
                     project_data = json.load(f)
-                # Compute live stats from CSVs
-                all_sigs = read_signals()
-                tradeable = [s for s in all_sigs if s.get("signal") in ("Buy", "Sell")]
-                wins   = [s for s in tradeable if s.get("outcome") == "W"]
-                losses = [s for s in tradeable if s.get("outcome") == "L"]
-                completed = len(wins) + len(losses)
-                wr = round(len(wins) / completed * 100, 1) if completed > 0 else 0
+                rows_by_coin = dm.load_rows_by_coin()
+                live_summary = dm.get_live_summary(rows_by_coin=rows_by_coin)
+                portfolio = live_summary.get("portfolio", {})
                 live_stats = {
-                    "total_trades": completed,
-                    "wins": len(wins),
-                    "losses": len(losses),
-                    "win_rate": wr,
+                    "total_trades": portfolio.get("total_completed", 0),
+                    "wins": portfolio.get("wins", 0),
+                    "losses": portfolio.get("losses", 0),
+                    "win_rate": portfolio.get("win_rate", 0),
                 }
                 payload = json.dumps({
                     "ok": True,
                     "data": {
                         **project_data,
                         "live_stats": live_stats,
+                        "live_summary": live_summary,
+                        "session_stats": dm.get_session_stats(project_data, rows_by_coin=rows_by_coin),
                     }
                 }, default=str).encode("utf-8")
             except Exception as e:
@@ -2121,7 +2517,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "project_log.json")
                 with open(log_path, "r") as f:
                     project_data = json.load(f)
-                payload = json.dumps({"ok": True, "data": project_data}).encode("utf-8")
+                rows_by_coin = dm.load_rows_by_coin()
+                payload = json.dumps(
+                    {
+                        "ok": True,
+                        "data": {
+                            **project_data,
+                            "live_summary": dm.get_live_summary(rows_by_coin=rows_by_coin),
+                            "session_stats": dm.get_session_stats(project_data, rows_by_coin=rows_by_coin),
+                        },
+                    },
+                    default=str,
+                ).encode("utf-8")
             except Exception as e:
                 payload = json.dumps({"ok": False, "error": str(e)}).encode("utf-8")
             self.send_response(200)
@@ -2144,7 +2551,7 @@ def _open_browser(url):
     webbrowser.open(url)
 
 
-class ReusableTCPServer(HTTPServer):
+class ReusableTCPServer(ThreadingHTTPServer):
     def server_bind(self):
         import socket
         self.socket.setsockopt(

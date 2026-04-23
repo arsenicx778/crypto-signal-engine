@@ -28,5 +28,17 @@
     "trade_count": 40,
     "overall_win_rate": 30,
     "summary": "Long trades are systemically underperforming (23% win rate on the primary setup), driven by poor risk/reward when entering with extreme RSI readings above 65 or high MACD values. Shorts show a clear edge when trend strength (ADX) and directional control (DI-) are both confirmed, achieving 63% win rates. The brain should drastically reduce long frequency and only enter longs in the 50-62 RSI zone with strong directional confluence, while leaning heavily into shorts when both ADX >= 27 and DI- clearly dominates."
+  },
+  {
+    "timestamp": "2026-04-21 19:24 PT",
+    "trade_count": 40,
+    "overall_win_rate": 30,
+    "summary": "The strategy is severely hampered by excessive LONG trading in overbought conditions (RSI > 60, DI+ > 40) and high-MACD environments that produce 13-20% win rates. SHORT trades show 2-3x better edge when sentiment is negative and trend strength is extreme (ADX > 40). The DNE signal miss rate of 33.6% suggests appropriate conservatism\u2014strengthening entry filters on RSI overbought rejection and MACD extremes would be more impactful than chasing additional signals."
+  },
+  {
+    "timestamp": "2026-04-22 00:12 PT",
+    "trade_count": 40,
+    "overall_win_rate": 25,
+    "summary": "The 25% overall win rate is driven by a systematic LONG bias failure (only 33% of longs win) offset by a viable SHORT edge (45-57% win rate on proper setups). DNE signal miss rate of 29.4% is acceptable given the poor quality of LONG entries\u2014being conservative avoids more losses. Recommend: Stop LONG trading unless sentiment > +0.35 AND ADX < 25; concentrate capital on SHORT setups with confirmed bearish structure (RSI < 40, DI- > 37, ADX > 28, MACD < -1.0)."
   }
 ]

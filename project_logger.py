@@ -21,6 +21,36 @@ def save_log(data):
         json.dump(data, f, indent=2)
 
 
+def _safe_number(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ensure_per_coin_entry(per_coin, coin, base_capital=None):
+    if not isinstance(per_coin, dict):
+        per_coin = {}
+
+    entry = per_coin.get(coin)
+    if not isinstance(entry, dict):
+        entry = {}
+
+    if base_capital is not None and "capital" not in entry:
+        entry["capital"] = round(_safe_number(base_capital, 1000.0), 2)
+
+    entry.setdefault("capital", 1000)
+    entry.setdefault("trades", 0)
+    entry.setdefault("wins", 0)
+    entry.setdefault("losses", 0)
+    entry.setdefault("win_rate", 0)
+    entry.setdefault("long_trades", 0)
+    entry.setdefault("short_trades", 0)
+
+    per_coin[coin] = entry
+    return per_coin, entry
+
+
 def record_trade_outcome(outcome, confidence, entry_price, close_price, coin="ETH", direction="LONG",
                          risk_amount=None, reward_amount=None):
     try:
@@ -38,7 +68,7 @@ def record_trade_outcome(outcome, confidence, entry_price, close_price, coin="ET
         session     = data["sessions"][session_idx]
 
         # Use dynamic amounts if provided, else fall back to % of current session capital
-        _capital_end = session["results"]["capital_end"]
+        _capital_end = _safe_number(session["results"].get("capital_end", 0), 0.0)
         _reward = reward_amount if reward_amount is not None else round(_capital_end * REWARD_PERCENT, 2)
         _risk   = risk_amount   if risk_amount   is not None else round(_capital_end * RISK_PERCENT,   2)
 
@@ -49,8 +79,6 @@ def record_trade_outcome(outcome, confidence, entry_price, close_price, coin="ET
         else:
             session["results"]["losses"]      += 1
             session["results"]["capital_end"] = round(_capital_end - _risk, 2)
-
-        session["results"]["capital_end"] = round(session["results"]["capital_end"])
 
         total = session["results"]["wins"] + session["results"]["losses"]
         session["results"]["win_rate"] = round(
@@ -68,30 +96,35 @@ def record_trade_outcome(outcome, confidence, entry_price, close_price, coin="ET
             data["totals"]["all_time_wins"] / all_total * 100
         ) if all_total > 0 else 0
 
-        if session["results"]["capital_end"] > data["totals"]["peak_capital"]:
-            data["totals"]["peak_capital"] = session["results"]["capital_end"]
+        if session["results"]["capital_end"] > _safe_number(data["totals"].get("peak_capital", 0), 0.0):
+            data["totals"]["peak_capital"] = round(session["results"]["capital_end"], 2)
 
         # Update per_coin breakdown (trades, wins, losses, win_rate, capital)
-        per_coin = data["totals"].get("per_coin", {})
-        if coin in per_coin:
-            pc = per_coin[coin]
-            pc["trades"] += 1
-            is_short = direction.upper() == "SHORT"
-            if is_short:
-                pc["short_trades"] = pc.get("short_trades", 0) + 1
-            else:
-                pc["long_trades"] = pc.get("long_trades", 0) + 1
-            _pc_cap = pc.get("capital", 1000)
-            _pc_reward = reward_amount if reward_amount is not None else round(_pc_cap * REWARD_PERCENT, 2)
-            _pc_risk   = risk_amount   if risk_amount   is not None else round(_pc_cap * RISK_PERCENT,   2)
-            if is_win:
-                pc["wins"]    += 1
-                pc["capital"] = round(_pc_cap + _pc_reward, 2)
-            else:
-                pc["losses"]  += 1
-                pc["capital"] = round(_pc_cap - _pc_risk, 2)
-            pc_total = pc["wins"] + pc["losses"]
-            pc["win_rate"] = round(pc["wins"] / pc_total * 100) if pc_total > 0 else 0
+        per_coin, pc = _ensure_per_coin_entry(
+            data["totals"].get("per_coin", {}),
+            coin,
+            base_capital=session.get("settings", {}).get("capital_per_coin", 1000),
+        )
+        data["totals"]["per_coin"] = per_coin
+
+        pc["trades"] += 1
+        is_short = direction.upper() == "SHORT"
+        if is_short:
+            pc["short_trades"] = pc.get("short_trades", 0) + 1
+        else:
+            pc["long_trades"] = pc.get("long_trades", 0) + 1
+
+        _pc_cap = _safe_number(pc.get("capital", 1000), 1000.0)
+        _pc_reward = reward_amount if reward_amount is not None else round(_pc_cap * REWARD_PERCENT, 2)
+        _pc_risk   = risk_amount   if risk_amount   is not None else round(_pc_cap * RISK_PERCENT,   2)
+        if is_win:
+            pc["wins"]    += 1
+            pc["capital"] = round(_pc_cap + _pc_reward, 2)
+        else:
+            pc["losses"]  += 1
+            pc["capital"] = round(_pc_cap - _pc_risk, 2)
+        pc_total = pc["wins"] + pc["losses"]
+        pc["win_rate"] = round(pc["wins"] / pc_total * 100) if pc_total > 0 else 0
 
         save_log(data)
         print(

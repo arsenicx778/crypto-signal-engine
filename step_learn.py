@@ -29,6 +29,7 @@ Everything else is soft and learned from outcomes.
 """
 
 import os
+import math
 import json
 from datetime import datetime
 from typing import Optional
@@ -152,6 +153,7 @@ def load_recent_completed_trades(csv_file: str, limit: int) -> list:
             "macd":       parsed.get("MACD"),
             "bb_width":   parsed.get("BB_WIDTH"),
             "sentiment":  sentiment,
+            "indicators": row.get("indicators", ""),
         })
     return completed[-limit:]
 
@@ -214,6 +216,170 @@ def is_trade_usable_for_learning(row: dict, parsed_indicators: dict) -> bool:
 
     return True
 
+# ── time decay ────────────────────────────────────────────────────────────────
+
+def decay_weight(trade_ts: str, now: datetime) -> float:
+    """Half-life of 7 days: a trade 7 days old counts 0.5x, 14 days counts 0.25x."""
+    if not trade_ts:
+        return 1.0
+    try:
+        ts = datetime.fromisoformat(str(trade_ts).replace("Z", "+00:00"))
+        if ts.tzinfo is not None and now.tzinfo is None:
+            ts = ts.replace(tzinfo=None)
+        elif ts.tzinfo is None and now.tzinfo is not None:
+            ts = ts.replace(tzinfo=now.tzinfo)
+        days_old = max(0.0, (now - ts).total_seconds() / 86400.0)
+    except Exception:
+        return 1.0
+    return math.exp(-days_old * math.log(2) / 7)
+
+# ── pattern key classification ────────────────────────────────────────────────
+
+def classify_pattern_key(direction: str, rsi, di_plus, di_minus, adx, macd) -> Optional[str]:
+    """Return a pattern key in the format step11 can match."""
+    if direction not in ("LONG", "SHORT"):
+        return None
+    if rsi is None or di_plus is None or di_minus is None or adx is None or macd is None:
+        return None
+
+    rsi = float(rsi)
+    di_plus = float(di_plus)
+    di_minus = float(di_minus)
+    adx = float(adx)
+    macd = float(macd)
+
+    if rsi < 40:
+        rsi_tag = "rsi_low"
+    elif rsi > 65:
+        rsi_tag = "rsi_high"
+    else:
+        rsi_tag = "rsi_mid"
+
+    gap_tag = "gap_strong" if abs(di_plus - di_minus) >= 15 else "gap_weak"
+    adx_tag = "adx_strong" if adx >= 27 else "adx_weak"
+    macd_tag = "macd_pos" if macd >= 0 else "macd_neg"
+
+    return f"{direction}|{rsi_tag}|{gap_tag}|{adx_tag}|{macd_tag}"
+
+# ── weighted pattern builder ──────────────────────────────────────────────────
+
+def build_weighted_patterns(trades: list) -> list:
+    """Group completed trades by pattern key, apply time-decay weights, return pattern dicts."""
+    now = now_pacific().replace(tzinfo=None)
+    buckets = {}  # key → {weighted_wins, weighted_losses, raw_count}
+
+    for t in trades:
+        key = classify_pattern_key(
+            t.get("direction"),
+            t.get("rsi"), t.get("di_plus"), t.get("di_minus"),
+            t.get("adx"), t.get("macd"),
+        )
+        if not key:
+            continue
+        w = decay_weight(t.get("timestamp", ""), now)
+        if key not in buckets:
+            buckets[key] = {"weighted_wins": 0.0, "weighted_losses": 0.0, "raw_count": 0}
+        if t.get("outcome") == "W":
+            buckets[key]["weighted_wins"] += w
+        else:
+            buckets[key]["weighted_losses"] += w
+        buckets[key]["raw_count"] += 1
+
+    patterns = []
+    for key, b in buckets.items():
+        total_w = b["weighted_wins"] + b["weighted_losses"]
+        if total_w == 0:
+            continue
+        wr = b["weighted_wins"] / total_w
+
+        if wr >= 0.55:
+            penalty, tag = 0, "NEUTRAL"
+        elif wr >= 0.45:
+            penalty, tag = 5, "CAUTION"
+        elif wr >= 0.35:
+            penalty, tag = 15, "AVOID"
+        else:
+            penalty, tag = 25, "STRONG_AVOID"
+
+        patterns.append({
+            "key": key,
+            "weighted_wins": round(b["weighted_wins"], 3),
+            "weighted_losses": round(b["weighted_losses"], 3),
+            "raw_count": b["raw_count"],
+            "weighted_win_rate": round(wr, 4),
+            "win_rate_pct": round(wr * 100, 1),
+            "confidence_penalty": penalty,
+            "penalty_tag": tag,
+        })
+
+    return patterns
+
+# ── regime fingerprint ────────────────────────────────────────────────────────
+
+def compute_regime(trades: list) -> dict:
+    """Summarise market regime from the last 20 completed trades."""
+    recent = trades[-20:]
+    adx_vals, rsi_vals, bb_vals = [], [], []
+
+    for t in recent:
+        parsed = parse_indicators(t.get("indicators", ""))
+        adx = parsed.get("ADX") or t.get("adx")
+        rsi = parsed.get("RSI") or t.get("rsi")
+        bb  = parsed.get("BB_WIDTH") or t.get("bb_width")
+        if adx is not None:
+            adx_vals.append(float(adx))
+        if rsi is not None:
+            rsi_vals.append(float(rsi))
+        if bb is not None:
+            bb_vals.append(float(bb))
+
+    def _avg(lst):
+        return round(sum(lst) / len(lst), 4) if lst else None
+
+    return {
+        "avg_adx":      _avg(adx_vals),
+        "avg_rsi":      _avg(rsi_vals),
+        "avg_bb_width": _avg(bb_vals),
+        "n_trades":     len(recent),
+        "captured_at":  now_pacific().isoformat(),
+    }
+
+# ── DNE outcome tracking ──────────────────────────────────────────────────────
+
+def evaluate_dne_signals(csv_rows: list) -> dict:
+    """
+    For every DNE row, look at the next 6 rows in timestamp order.
+    If a W trade follows → missed_opportunity, else → correct_dne.
+    """
+    sorted_rows = sorted(csv_rows, key=lambda r: str(r.get("timestamp", "")))
+
+    missed = 0
+    correct = 0
+
+    for i, row in enumerate(sorted_rows):
+        if str(row.get("signal", "")).strip() != "Do Not Enter":
+            continue
+        window = sorted_rows[i + 1: i + 7]
+        won_after = any(
+            str(r.get("outcome", "")).strip() == "W"
+            for r in window
+            if str(r.get("signal", "")).strip() in ("Buy", "Sell")
+        )
+        if won_after:
+            missed += 1
+        else:
+            correct += 1
+
+    total = missed + correct
+    miss_rate = round(missed / total, 4) if total > 0 else 0.0
+
+    return {
+        "missed_opportunity": missed,
+        "correct_dne": correct,
+        "total_dne": total,
+        "miss_rate": miss_rate,
+    }
+
 # ── compact trade formatter ───────────────────────────────────────────────────
 
 def format_trades_for_haiku(trades: list) -> str:
@@ -239,7 +405,7 @@ def format_trades_for_haiku(trades: list) -> str:
 
 # ── haiku call ────────────────────────────────────────────────────────────────
 
-def call_haiku_for_patterns(coin: str, trades: list) -> dict:
+def call_haiku_for_patterns(coin: str, trades: list, dne_analysis: dict = None) -> dict:
     import anthropic
 
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
@@ -248,6 +414,18 @@ def call_haiku_for_patterns(coin: str, trades: list) -> dict:
     wins = sum(1 for t in trades if t["outcome"] == "W")
     losses = total - wins
 
+    dne_block = ""
+    if dne_analysis and dne_analysis.get("total_dne", 0) > 0:
+        dne_block = (
+            f"\nDNE SIGNAL ANALYSIS (last run):\n"
+            f"  Total DNE signals: {dne_analysis['total_dne']}\n"
+            f"  Missed opportunities (W trade followed within 6 rows): {dne_analysis['missed_opportunity']}\n"
+            f"  Correct DNEs (no W followed): {dne_analysis['correct_dne']}\n"
+            f"  Miss rate: {dne_analysis['miss_rate']*100:.1f}%\n"
+            f"Please comment on whether the DNE signals appear too conservative "
+            f"(high miss rate) or appropriately cautious.\n"
+        )
+
     prompt = f"""You are analyzing recent trading outcomes for {coin} to identify patterns.
 
 TRADE DATA (most recent {total} completed trades, oldest first):
@@ -255,7 +433,7 @@ Format: DIRECTION,CONFIDENCE,OUTCOME,RSI,ADX,DI+,DI-,SENTIMENT,MACD,BB_WIDTH
 {trade_text}
 
 Overall: {wins}W {losses}L out of {total} trades.
-
+{dne_block}
 Analyze these outcomes and identify specific conditions that correlate with wins versus losses.
 Focus on: direction combined with sentiment thresholds, RSI ranges, ADX thresholds,
 DI gap size patterns, MACD direction, BB_WIDTH, any other clear pattern.
@@ -310,7 +488,8 @@ Be specific with numbers (e.g. sentiment > 0.50 not high sentiment).
 
 # ── write learning file ───────────────────────────────────────────────────────
 
-def write_learning(coin: str, patterns: dict):
+def write_learning(coin: str, patterns: dict, weighted_patterns: list = None,
+                   regime: dict = None, dne_analysis: dict = None):
     now = now_pacific().strftime("%Y-%m-%d %H:%M PT")
     output = {
         "coin": coin,
@@ -318,10 +497,16 @@ def write_learning(coin: str, patterns: dict):
         "trade_count": patterns.get("trade_count", 0),
         "overall_win_rate": patterns.get("overall_win_rate", 0),
         "patterns": patterns.get("patterns", []),
+        "weighted_patterns": weighted_patterns or [],
         "strongest_long_setup": patterns.get("strongest_long_setup", ""),
         "strongest_short_setup": patterns.get("strongest_short_setup", ""),
         "summary": patterns.get("summary", ""),
     }
+    if regime is not None:
+        output["regime"] = regime
+    if dne_analysis is not None:
+        output["dne_analysis"] = dne_analysis
+
     path = learning_path(coin)
     with open(path, "w") as f:
         json.dump(output, f, indent=2)
@@ -346,7 +531,8 @@ def write_learning(coin: str, patterns: dict):
 
     print(f"[LEARN:{coin}] Updated: {patterns.get('trade_count',0)} trades, "
           f"{patterns.get('overall_win_rate',0)}% WR, "
-          f"{len(patterns.get('patterns',[]))} patterns")
+          f"{len(patterns.get('patterns',[]))} patterns, "
+          f"{len(weighted_patterns or [])} weighted pattern keys")
 
 # ── brain injection ───────────────────────────────────────────────────────────
 
@@ -424,10 +610,25 @@ def run_learning_for_coin(coin: str) -> bool:
     )
     if not trades:
         return False
-    patterns = call_haiku_for_patterns(coin, trades)
+
+    # Build derived analytics before calling Haiku
+    weighted_patterns = build_weighted_patterns(trades)
+    regime = compute_regime(trades)
+
+    # DNE analysis needs all CSV rows (not just completed trades)
+    try:
+        all_rows = read_latest_signals(csv_file)
+    except Exception:
+        all_rows = []
+    dne_analysis = evaluate_dne_signals(all_rows)
+
+    patterns = call_haiku_for_patterns(coin, trades, dne_analysis=dne_analysis)
     if not patterns:
         return False
-    write_learning(coin, patterns)
+    write_learning(coin, patterns,
+                   weighted_patterns=weighted_patterns,
+                   regime=regime,
+                   dne_analysis=dne_analysis)
     write_state(
         coin,
         current_count,
