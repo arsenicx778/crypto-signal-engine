@@ -1,65 +1,72 @@
 {
   "coin": "XRP",
-  "generated_at": "2026-04-21 17:00 PT",
-  "trade_count": 31,
-  "overall_win_rate": 55,
+  "generated_at": "2026-05-01 23:14 UTC",
+  "source": "historical_bootstrap",
+  "candles_analyzed": 721,
+  "trade_count": 41,
+  "overall_win_rate": 49,
   "patterns": [
     {
-      "condition": "LONG with DI+ > DI- gap >= 10 and ADX >= 30",
-      "wins": 8,
-      "losses": 3,
-      "win_rate": 73,
-      "recommendation": "Prioritize LONG entries when DI+ exceeds DI- by 10+ points and ADX confirms trend strength above 30.",
-      "confidence": "high",
-      "sample_size_note": null
-    },
-    {
-      "condition": "SHORT with DI- > DI- gap >= 8 and ADX >= 27",
-      "wins": 4,
-      "losses": 4,
-      "win_rate": 50,
-      "recommendation": "SHORT trades show no edge; avoid or require additional confirmation beyond DI positioning.",
-      "confidence": "low",
-      "sample_size_note": null
-    },
-    {
-      "condition": "LONG with RSI 49-60 and positive sentiment >= +0.15",
-      "wins": 9,
-      "losses": 4,
-      "win_rate": 69,
-      "recommendation": "LONG trades in the 49-60 RSI zone with sentiment >= +0.15 demonstrate strong edge; avoid overbought RSI > 65 on LONG.",
-      "confidence": "high",
-      "sample_size_note": null
-    },
-    {
-      "condition": "LONG with RSI > 60 (overbought territory)",
+      "condition": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
       "wins": 2,
-      "losses": 3,
-      "win_rate": 40,
-      "recommendation": "Avoid LONG entries when RSI exceeds 60; this creates a false strength signal and increases drawdown risk.",
-      "confidence": "high",
-      "sample_size_note": null
-    },
-    {
-      "condition": "SHORT with low ADX < 20 (weak trend)",
-      "wins": 1,
-      "losses": 2,
-      "win_rate": 33,
-      "recommendation": "Avoid SHORT trades during weak trend conditions (ADX < 20); market lacks directional conviction.",
+      "losses": 5,
+      "win_rate": 28,
+      "recommendation": "Avoid this setup \u2014 29% historical win rate, negative edge.",
       "confidence": "medium",
-      "sample_size_note": "Only 3 observations"
+      "sample_size_note": "7 historical occurrences"
     },
     {
-      "condition": "LONG with ADX >= 40 and DI+ > 40",
+      "condition": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg",
       "wins": 3,
       "losses": 3,
       "win_rate": 50,
-      "recommendation": "High ADX + strong DI+ shows mixed results; confirm with RSI < 65 to avoid overbought reversals.",
+      "recommendation": "Proceed with caution \u2014 50% historical win rate, borderline edge.",
       "confidence": "medium",
-      "sample_size_note": null
+      "sample_size_note": "6 historical occurrences"
+    },
+    {
+      "condition": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "wins": 6,
+      "losses": 2,
+      "win_rate": 75,
+      "recommendation": "Favor this setup \u2014 75% historical win rate over 8 trades.",
+      "confidence": "medium",
+      "sample_size_note": "8 historical occurrences"
     }
   ],
-  "strongest_long_setup": "LONG when DI+ > DI- by 10+ points, ADX 27-40, RSI 49-62, and sentiment >= +0.15. This combination achieved 73% win rate across strong sample size.",
-  "strongest_short_setup": "SHORT trades lack consistent edge (50% or below across all tested conditions). Insufficient conviction to recommend; SHORT only as hedge against failed LONG entries.",
-  "summary": "XRP LONG trades outperform SHORT significantly (67% win rate vs 44%), with the strongest setup combining moderate trend strength (ADX 27-40), clear directional dominance (DI+ gap 10+), mid-range momentum (RSI 49-62), and positive sentiment. Avoid LONG entries in overbought RSI > 60 territory where reversals spike; SHORT positions lack statistical edge and should be deprioritized."
+  "weighted_patterns": [
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 2.0,
+      "weighted_losses": 5.0,
+      "raw_count": 7,
+      "weighted_win_rate": 0.2857,
+      "win_rate_pct": 28.6,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 3.0,
+      "weighted_losses": 3.0,
+      "raw_count": 6,
+      "weighted_win_rate": 0.5,
+      "win_rate_pct": 50.0,
+      "confidence_penalty": 5,
+      "penalty_tag": "CAUTION"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 6.0,
+      "weighted_losses": 2.0,
+      "raw_count": 8,
+      "weighted_win_rate": 0.75,
+      "win_rate_pct": 75.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    }
+  ],
+  "strongest_long_setup": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg (75% WR)",
+  "strongest_short_setup": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg (50% WR)",
+  "summary": "Bootstrap from 721 historical 5-minute candles. 41 simulated trades, 49% win rate. 3 pattern keys with 5+ occurrences. Use these as starting priors; live trading will refine them."
 }

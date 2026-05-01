@@ -1,32 +1,11 @@
 {
   "project_name": "crypto-signal-engine",
-  "started": "2026-04-02",
-  "current_session": 2,
+  "started": "2026-04-23",
+  "current_session": 1,
   "sessions": [
     {
       "session": 1,
-      "date_start": "2026-04-02",
-      "date_end": "2026-04-05",
-      "settings": {
-        "coin": "BTC",
-        "threshold": 70,
-        "reward_risk": "2:1",
-        "concurrent": 1,
-        "cycle_minutes": 5
-      },
-      "results": {
-        "trades": 2,
-        "wins": 1,
-        "losses": 1,
-        "win_rate": 50,
-        "capital_start": 1000,
-        "capital_end": 1000
-      },
-      "notes": "Initial BTC test. API key issues caused most cycles to fail. Switched to ETH after this session."
-    },
-    {
-      "session": 2,
-      "date_start": "2026-04-06",
+      "date_start": "2026-04-23",
       "date_end": "ongoing",
       "settings": {
         "coins": [
@@ -46,19 +25,19 @@
         "reward_risk_ratio": 1.5
       },
       "results": {
-        "trades": 201,
-        "wins": 77,
-        "losses": 124,
-        "win_rate": 38,
+        "trades": 85,
+        "wins": 23,
+        "losses": 62,
+        "win_rate": 27,
         "capital_start": 4000,
-        "capital_end": 3933.5
+        "capital_end": 3480.04
       },
-      "notes": "ETH/SOL/AVAX/XRP parallel. $1,000 per coin, 2% risk, 3% reward (percentage-based). DI+/DI- mandatory, short signals, gate fix, 3-min cycles."
+      "notes": "Fresh multi-coin reset on 2026-04-23. ETH/SOL/AVAX/XRP paper trading restart from clean state."
     }
   ],
   "milestones": {
-    "engine_running": true,
-    "first_win": true,
+    "engine_running": false,
+    "first_win": false,
     "paper_trading_started": true,
     "di_rules_added": true,
     "gate_fixed": true,
@@ -88,51 +67,60 @@
     "cooldown_rule_active": false,
     "percentage_risk_active": true,
     "current_stable_days": 0,
-    "paper_trading_start": "2026-04-03"
+    "paper_trading_start": "2026-04-23"
   },
   "totals": {
-    "all_time_trades": 201,
-    "all_time_wins": 77,
-    "all_time_losses": 124,
-    "all_time_win_rate": 38,
-    "peak_capital": 4830,
-    "sessions_run": 2,
+    "all_time_trades": 85,
+    "all_time_wins": 23,
+    "all_time_losses": 62,
+    "all_time_win_rate": 27,
+    "peak_capital": 4020.9,
+    "sessions_run": 1,
     "per_coin": {
       "ETH": {
-        "capital": 547.5,
-        "trades": 112,
-        "wins": 39,
-        "losses": 73,
-        "win_rate": 35,
-        "long_trades": 44,
-        "short_trades": 38
+        "capital": 708.8,
+        "trades": 56,
+        "wins": 16,
+        "losses": 40,
+        "win_rate": 29,
+        "long_trades": 33,
+        "short_trades": 23
       },
       "SOL": {
-        "capital": 853.42,
-        "trades": 43,
-        "wins": 14,
-        "losses": 29,
-        "win_rate": 33,
-        "short_trades": 9,
-        "long_trades": 17
+        "capital": 988.36,
+        "trades": 13,
+        "wins": 5,
+        "losses": 8,
+        "win_rate": 38,
+        "long_trades": 9,
+        "short_trades": 4
       },
       "AVAX": {
-        "capital": 999.7,
-        "trades": 11,
-        "wins": 6,
-        "losses": 5,
-        "win_rate": 55,
-        "long_trades": 5,
-        "short_trades": 2
+        "capital": 960.4,
+        "trades": 2,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0,
+        "long_trades": 1,
+        "short_trades": 1
       },
       "XRP": {
-        "capital": 1127.69,
-        "trades": 35,
-        "wins": 18,
-        "losses": 17,
-        "win_rate": 51,
-        "long_trades": 14,
-        "short_trades": 12
+        "capital": 881.68,
+        "trades": 11,
+        "wins": 2,
+        "losses": 9,
+        "win_rate": 18,
+        "long_trades": 6,
+        "short_trades": 5
+      },
+      "LINK": {
+        "capital": 940.8,
+        "trades": 3,
+        "wins": 0,
+        "losses": 3,
+        "win_rate": 0,
+        "long_trades": 3,
+        "short_trades": 0
       }
     }
   }

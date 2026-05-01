@@ -1,0 +1,210 @@
+{
+  "coin": "ETH",
+  "generated_at": "2026-04-23 12:03 PT",
+  "trade_count": 40,
+  "overall_win_rate": 25,
+  "patterns": [
+    {
+      "condition": "LONG with RSI >= 60 and MACD > 0",
+      "wins": 2,
+      "losses": 8,
+      "win_rate": 20,
+      "recommendation": "Avoid LONG entries when RSI overbought (>=60) despite positive MACD; these are reversal zones not continuation signals.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "SHORT with ADX >= 40 (strong trend)",
+      "wins": 4,
+      "losses": 1,
+      "win_rate": 80,
+      "recommendation": "Prioritize SHORT trades when ADX >= 40 confirms strong downtrend; this is the highest-confidence short setup.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "SHORT with MACD < -1.5 and DI- > DI+",
+      "wins": 3,
+      "losses": 5,
+      "win_rate": 37,
+      "recommendation": "SHORT bias is weak despite bearish indicators; require ADX confirmation or sentiment < 0 before entry.",
+      "confidence": "medium",
+      "sample_size_note": null
+    },
+    {
+      "condition": "LONG with DI+ > DI- by 20+ points and MACD > 1.0",
+      "wins": 3,
+      "losses": 4,
+      "win_rate": 43,
+      "recommendation": "Large DI gap (20+) with strong MACD shows promise; combine with ADX > 25 and avoid if RSI > 70.",
+      "confidence": "medium",
+      "sample_size_note": null
+    },
+    {
+      "condition": "LONG with RSI 50-60 (neutral zone), positive MACD, ADX > 25",
+      "wins": 1,
+      "losses": 0,
+      "win_rate": 100,
+      "recommendation": "Mid-range RSI entries with strong trend (ADX>25) and positive MACD show potential; expand this setup.",
+      "confidence": "low",
+      "sample_size_note": "Only 1 observation (trade 17)"
+    },
+    {
+      "condition": "Sentiment <= -0.35 with any direction",
+      "wins": 0,
+      "losses": 8,
+      "win_rate": 0,
+      "recommendation": "Halt all trading when sentiment drops to -0.35 or below; this marks periods of systematic losses.",
+      "confidence": "high",
+      "sample_size_note": null
+    }
+  ],
+  "weighted_patterns": [
+    {
+      "key": "SHORT|rsi_low|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 1.81,
+      "weighted_losses": 2.922,
+      "raw_count": 7,
+      "weighted_win_rate": 0.3826,
+      "win_rate_pct": 38.3,
+      "confidence_penalty": 15,
+      "penalty_tag": "AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.563,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.313,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.565,
+      "weighted_losses": 1.678,
+      "raw_count": 3,
+      "weighted_win_rate": 0.2519,
+      "win_rate_pct": 25.2,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.618,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_high|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 0.74,
+      "weighted_losses": 0.619,
+      "raw_count": 2,
+      "weighted_win_rate": 0.5445,
+      "win_rate_pct": 54.4,
+      "confidence_penalty": 5,
+      "penalty_tag": "CAUTION"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 3.706,
+      "raw_count": 5,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.384,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 1.341,
+      "weighted_losses": 1.615,
+      "raw_count": 4,
+      "weighted_win_rate": 0.4537,
+      "win_rate_pct": 45.4,
+      "confidence_penalty": 5,
+      "penalty_tag": "CAUTION"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_pos",
+      "weighted_wins": 0.733,
+      "weighted_losses": 1.558,
+      "raw_count": 3,
+      "weighted_win_rate": 0.32,
+      "win_rate_pct": 32.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_high|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 0.74,
+      "weighted_losses": 3.098,
+      "raw_count": 5,
+      "weighted_win_rate": 0.1928,
+      "win_rate_pct": 19.3,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_strong|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.832,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.699,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    }
+  ],
+  "strongest_long_setup": "LONG when DI+ > DI- by 20+ points, ADX 25-35, RSI 50-65 (not overbought), MACD > 0.5, and sentiment >= 0.25. Avoid when RSI > 70.",
+  "strongest_short_setup": "SHORT when ADX >= 40 with DI- > DI+, RSI < 45, MACD < -1.5, and sentiment <= 0. This yields 80% win rate but is rare (5 trades). General SHORT setup is weak with only 37% win rate elsewhere.",
+  "summary": "Portfolio is severely constrained by long-biased trades in unfavorable conditions (80% of positions are LONG with only 23% win rate). The data reveals a critical insight: SHORT trades with strong ADX confirmation (>=40) are highly reliable (80% win rate), but comprise only 12.5% of activity. Extreme negative sentiment (<-0.35) marks liquidation periods (0% win rate). The brain should dramatically reduce LONG entries when RSI > 60, prioritize SHORT signals when ADX confirms strong trends, and implement hard stops during sentiment extremes.",
+  "regime": {
+    "avg_adx": 28.7663,
+    "avg_rsi": 49.2849,
+    "avg_bb_width": null,
+    "n_trades": 20,
+    "captured_at": "2026-04-23T12:03:41.251959-07:00"
+  },
+  "dne_analysis": {
+    "missed_opportunity": 82,
+    "correct_dne": 205,
+    "total_dne": 287,
+    "miss_rate": 0.2857
+  }
+}

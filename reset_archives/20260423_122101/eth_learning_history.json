@@ -1,0 +1,8 @@
+[
+  {
+    "timestamp": "2026-04-23 12:03 PT",
+    "trade_count": 40,
+    "overall_win_rate": 25,
+    "summary": "Portfolio is severely constrained by long-biased trades in unfavorable conditions (80% of positions are LONG with only 23% win rate). The data reveals a critical insight: SHORT trades with strong ADX confirmation (>=40) are highly reliable (80% win rate), but comprise only 12.5% of activity. Extreme negative sentiment (<-0.35) marks liquidation periods (0% win rate). The brain should dramatically reduce LONG entries when RSI > 60, prioritize SHORT signals when ADX confirms strong trends, and implement hard stops during sentiment extremes."
+  }
+]

@@ -8,14 +8,14 @@ COIN_CAPITAL_START = 1000.0
 PORTFOLIO_CAPITAL_START = COIN_CAPITAL_START * 4
 RISK_PERCENT = 0.02
 REWARD_PERCENT = 0.03
-COIN_ORDER = ["ETH", "SOL", "AVAX", "XRP"]
+COIN_ORDER = ["ETH", "SOL", "LINK", "XRP"]
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
 COIN_CSV_FILES = {
-    "ETH": os.path.join(_BASE, "eth_signals.csv"),
-    "SOL": os.path.join(_BASE, "sol_signals.csv"),
-    "AVAX": os.path.join(_BASE, "avax_signals.csv"),
-    "XRP": os.path.join(_BASE, "xrp_signals.csv"),
+    "ETH":  os.path.join(_BASE, "eth_signals.csv"),
+    "SOL":  os.path.join(_BASE, "sol_signals.csv"),
+    "LINK": os.path.join(_BASE, "link_signals.csv"),
+    "XRP":  os.path.join(_BASE, "xrp_signals.csv"),
 }
 
 

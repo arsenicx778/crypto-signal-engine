@@ -17,8 +17,10 @@ def load_log():
 
 
 def save_log(data):
-    with open(PROJECT_LOG, "w") as f:
+    tmp_path = PROJECT_LOG + ".tmp"
+    with open(tmp_path, "w") as f:
         json.dump(data, f, indent=2)
+    os.replace(tmp_path, PROJECT_LOG)
 
 
 def _safe_number(value, default=0.0):

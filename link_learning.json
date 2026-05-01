@@ -1,0 +1,72 @@
+{
+  "coin": "LINK",
+  "generated_at": "2026-05-01 23:14 UTC",
+  "source": "historical_bootstrap",
+  "candles_analyzed": 721,
+  "trade_count": 46,
+  "overall_win_rate": 50,
+  "patterns": [
+    {
+      "condition": "SHORT|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "wins": 2,
+      "losses": 3,
+      "win_rate": 40,
+      "recommendation": "Avoid this setup \u2014 40% historical win rate, negative edge.",
+      "confidence": "medium",
+      "sample_size_note": "5 historical occurrences"
+    },
+    {
+      "condition": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "wins": 6,
+      "losses": 3,
+      "win_rate": 66,
+      "recommendation": "Favor this setup \u2014 67% historical win rate over 9 trades.",
+      "confidence": "medium",
+      "sample_size_note": "9 historical occurrences"
+    },
+    {
+      "condition": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "wins": 5,
+      "losses": 0,
+      "win_rate": 100,
+      "recommendation": "Favor this setup \u2014 100% historical win rate over 5 trades.",
+      "confidence": "medium",
+      "sample_size_note": "5 historical occurrences"
+    }
+  ],
+  "weighted_patterns": [
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 2.0,
+      "weighted_losses": 3.0,
+      "raw_count": 5,
+      "weighted_win_rate": 0.4,
+      "win_rate_pct": 40.0,
+      "confidence_penalty": 15,
+      "penalty_tag": "AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 6.0,
+      "weighted_losses": 3.0,
+      "raw_count": 9,
+      "weighted_win_rate": 0.6667,
+      "win_rate_pct": 66.7,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 5.0,
+      "weighted_losses": 0.0,
+      "raw_count": 5,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    }
+  ],
+  "strongest_long_setup": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg (100% WR)",
+  "strongest_short_setup": "SHORT|rsi_mid|gap_weak|adx_weak|macd_pos (40% WR)",
+  "summary": "Bootstrap from 721 historical 5-minute candles. 46 simulated trades, 50% win rate. 3 pattern keys with 5+ occurrences. Use these as starting priors; live trading will refine them."
+}

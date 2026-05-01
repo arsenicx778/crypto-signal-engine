@@ -1,0 +1,210 @@
+{
+  "coin": "XRP",
+  "generated_at": "2026-04-23 12:06 PT",
+  "trade_count": 35,
+  "overall_win_rate": 51,
+  "patterns": [
+    {
+      "condition": "LONG with ADX >= 40 (strong trend confirmation)",
+      "wins": 3,
+      "losses": 4,
+      "win_rate": 43,
+      "recommendation": "High ADX alone does not guarantee wins; require additional filters like DI+ > 50 or RSI > 70 to improve edge.",
+      "confidence": "medium",
+      "sample_size_note": "7 observations, limited sample"
+    },
+    {
+      "condition": "LONG with DI+ > 45 and DI- < 25 (strong directional dominance)",
+      "wins": 4,
+      "losses": 2,
+      "win_rate": 67,
+      "recommendation": "This is the strongest LONG setup; prioritize trades meeting both DI thresholds for consistent profitability.",
+      "confidence": "high",
+      "sample_size_note": "6 observations"
+    },
+    {
+      "condition": "SHORT trades (all directions combined)",
+      "wins": 4,
+      "losses": 6,
+      "win_rate": 40,
+      "recommendation": "SHORT bias is underwater; avoid SHORT entries or require much stricter confirmation filters before initiating.",
+      "confidence": "high",
+      "sample_size_note": "10 observations"
+    },
+    {
+      "condition": "LONG with RSI > 65 (overbought range)",
+      "wins": 3,
+      "losses": 3,
+      "win_rate": 50,
+      "recommendation": "RSI > 65 is neutral; only trade when combined with ADX > 45 and tight DI gap (DI+ > 50, DI- < 20).",
+      "confidence": "medium",
+      "sample_size_note": "6 observations"
+    },
+    {
+      "condition": "LONG with SENTIMENT < -0.35 (negative sentiment)",
+      "wins": 1,
+      "losses": 3,
+      "win_rate": 25,
+      "recommendation": "Avoid LONG entries during strongly negative sentiment; recent pattern shows 75% loss rate in this regime.",
+      "confidence": "high",
+      "sample_size_note": "4 observations"
+    },
+    {
+      "condition": "LONG with SENTIMENT > 0.50 and ADX 20-35 (weak trend, positive mood)",
+      "wins": 3,
+      "losses": 1,
+      "win_rate": 75,
+      "recommendation": "Moderate-trend environments with positive sentiment present a strong LONG edge; pursue these setups actively.",
+      "confidence": "high",
+      "sample_size_note": "4 observations"
+    }
+  ],
+  "weighted_patterns": [
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 1.444,
+      "weighted_losses": 0.0,
+      "raw_count": 5,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.459,
+      "raw_count": 3,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 0.371,
+      "weighted_losses": 0.618,
+      "raw_count": 2,
+      "weighted_win_rate": 0.3749,
+      "win_rate_pct": 37.5,
+      "confidence_penalty": 15,
+      "penalty_tag": "AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.903,
+      "weighted_losses": 0.549,
+      "raw_count": 3,
+      "weighted_win_rate": 0.6221,
+      "win_rate_pct": 62.2,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_high|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 1.684,
+      "weighted_losses": 1.703,
+      "raw_count": 5,
+      "weighted_win_rate": 0.4972,
+      "win_rate_pct": 49.7,
+      "confidence_penalty": 5,
+      "penalty_tag": "CAUTION"
+    },
+    {
+      "key": "LONG|rsi_high|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.407,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.233,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.274,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 0.454,
+      "weighted_losses": 0.733,
+      "raw_count": 2,
+      "weighted_win_rate": 0.3827,
+      "win_rate_pct": 38.3,
+      "confidence_penalty": 15,
+      "penalty_tag": "AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.506,
+      "weighted_losses": 1.127,
+      "raw_count": 3,
+      "weighted_win_rate": 0.3096,
+      "win_rate_pct": 31.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 1.054,
+      "weighted_losses": 0.0,
+      "raw_count": 2,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.516,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 0.619,
+      "weighted_losses": 0.0,
+      "raw_count": 1,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    }
+  ],
+  "strongest_long_setup": "LONG when DI+ > 45, DI- < 25, SENTIMENT > 0.30, and ADX 25-40 (moderate trending, strong directional bias). Win rate observed: 67-75%.",
+  "strongest_short_setup": "Insufficient edge detected. SHORT win rate is 40% overall with no sub-condition improving above 50%. Recommend avoiding SHORT bias entirely or redesigning SHORT entry criteria.",
+  "summary": "The dataset reveals a clear LONG bias with 51% overall wins, but success is highly conditional. The strongest LONG setups require both DI+ dominance (>45) and low DI- (<25) combined with positive-to-neutral sentiment, yielding 67-75% win rates. SHORT trades are consistently unprofitable at 40% win rate regardless of conditions. The DNE signal miss rate of 56.5% suggests the signal filter is too conservative; relaxing it slightly could capture more valid LONG opportunities, especially during moderate-trend, positive-sentiment environments where the data shows strong edge.",
+  "regime": {
+    "avg_adx": 35.5086,
+    "avg_rsi": 52.2685,
+    "avg_bb_width": null,
+    "n_trades": 20,
+    "captured_at": "2026-04-23T12:06:51.355353-07:00"
+  },
+  "dne_analysis": {
+    "missed_opportunity": 48,
+    "correct_dne": 37,
+    "total_dne": 85,
+    "miss_rate": 0.5647
+  }
+}

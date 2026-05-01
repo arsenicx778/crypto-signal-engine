@@ -1,0 +1,8 @@
+[
+  {
+    "timestamp": "2026-04-23 12:19 PT",
+    "trade_count": 40,
+    "overall_win_rate": 28,
+    "summary": "Your system is heavily skewed toward LONG bias with strong edge when momentum (MACD positive) and trend strength (ADX>25) align with directional dominance (DI+ >35). Critical failure: trading LONG into strongly bearish sentiment (\u2264-0.30) produces 90% loss rate and should be auto-blocked. SHORT trades fail 87% of the time and should be avoided. DNE signal miss rate of 23.8% suggests moderate conservatism\u2014acceptable given the poor risk/reward of forced entries."
+  }
+]

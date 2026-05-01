@@ -10,7 +10,7 @@ REWARD_PERCENT   = 0.03     # 3% of coin capital per win (1.5:1)
 COIN_CSV = {
     "ETH":  "eth_signals.csv",
     "SOL":  "sol_signals.csv",
-    "AVAX": "avax_signals.csv",
+    "LINK": "link_signals.csv",
     "XRP":  "xrp_signals.csv",
 }
 
@@ -18,7 +18,7 @@ _gate_lock = threading.Lock()
 gate_state = {
     "ETH":  {"open_trades": 0, "open_longs": 0, "open_shorts": 0, "capital": 1000},
     "SOL":  {"open_trades": 0, "open_longs": 0, "open_shorts": 0, "capital": 1000},
-    "AVAX": {"open_trades": 0, "open_longs": 0, "open_shorts": 0, "capital": 1000},
+    "LINK": {"open_trades": 0, "open_longs": 0, "open_shorts": 0, "capital": 1000},
     "XRP":  {"open_trades": 0, "open_longs": 0, "open_shorts": 0, "capital": 1000},
 }
 
@@ -132,10 +132,19 @@ def get_todays_stats(signals_file=None):
 def _build_display_line():
     """Read all 4 coin CSVs and return a combined status string."""
     parts = []
-    for name in ["ETH", "SOL", "AVAX", "XRP"]:
+    for name in ["ETH", "SOL", "LINK", "XRP"]:
         s = gate_state[name]
         parts.append(f"{name}: ${s['capital']:,.0f} | L:{s['open_longs']} S:{s['open_shorts']}")
     return " | ".join(parts)
+
+
+def is_fully_blocked(signals_file=None):
+    """Cheap check: returns (blocked: bool, open_longs: int, open_shorts: int).
+    Called before any Haiku steps — no capital calc, no stats, no API calls."""
+    open_longs  = get_open_longs(signals_file)
+    open_shorts = get_open_shorts(signals_file)
+    total = len(open_longs) + len(open_shorts)
+    return total >= 2, len(open_longs), len(open_shorts)
 
 
 def pre_signal_gate(signals_file=None, coin_name="ETH", capital_start=CAPITAL):
@@ -164,9 +173,11 @@ def pre_signal_gate(signals_file=None, coin_name="ETH", capital_start=CAPITAL):
     # Max 2 concurrent positions per coin (1 long + 1 short, or 2 longs, or 2 shorts)
     if len(open_trades) >= 2:
         return {
-            "proceed":    False,
-            "reason":     f"2 {coin_name} positions already open (L:{len(open_longs)} S:{len(open_shorts)}) — waiting for outcome",
-            "open_trade": open_trades[-1],
+            "proceed":     False,
+            "reason":      f"2 {coin_name} positions already open (L:{len(open_longs)} S:{len(open_shorts)}) — waiting for outcome",
+            "open_trade":  open_trades[-1],
+            "open_longs":  len(open_longs),
+            "open_shorts": len(open_shorts),
         }
 
     stats = get_todays_stats(signals_file)

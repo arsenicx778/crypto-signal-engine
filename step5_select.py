@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import anthropic
 from dotenv import load_dotenv
 
@@ -14,7 +15,23 @@ CANDIDATE_INDICATORS = [
     "atr", "vwap", "adx", "obv"
 ]
 
-def select_indicators(all_indicators):
+_CACHE_TTL_SECONDS = 15 * 60  # 15 minutes — matches sentiment cache TTL
+
+# keyed by coin_name → {"result": ..., "fetched_at": float}
+_indicator_cache: dict = {}
+
+
+def select_indicators(all_indicators, coin_name: str = "ETH"):
+    now = time.monotonic()
+    cached = _indicator_cache.get(coin_name)
+    if cached:
+        age_seconds = now - cached["fetched_at"]
+        if age_seconds < _CACHE_TTL_SECONDS:
+            age_minutes = age_seconds / 60
+            print(f"[STEP5:{coin_name}] indicator selection cache hit ({age_minutes:.0f}m old)")
+            return cached["result"]
+
+    print(f"[STEP5:{coin_name}] indicator selection fresh call")
     try:
         indicators_text = "\n".join(
             f"- {k}: {v}" for k, v in all_indicators.items() if k != "close"
@@ -44,7 +61,9 @@ Output ONLY valid JSON in this exact format with no other text:
         merged = MANDATORY_INDICATORS + [i for i in valid if i not in MANDATORY_INDICATORS]
         result["selected"] = merged
         result["count"] = len(merged)
-        return {"success": True, "data": result}
+        out = {"success": True, "data": result}
+        _indicator_cache[coin_name] = {"result": out, "fetched_at": now}
+        return out
     except Exception as e:
         print(f"[WARN] Indicator selection failed: {e} — using defaults")
         return {

@@ -154,6 +154,15 @@ def monitor_price(timestamp, stop_loss=None, take_profit=None,
                     print(f"[MONITOR:{coin_name}] Trade {timestamp} missing TP/SL")
                     break
 
+                # Derive direction from stored field; fall back to SL position vs entry
+                _stored_dir = (latest_trade.get("direction") or "").strip().upper()
+                if _stored_dir in ("LONG", "SHORT"):
+                    _live_is_short = _stored_dir == "SHORT"
+                else:
+                    _entry_live = float(latest_trade.get("entry_price") or 0)
+                    _live_is_short = bool(_entry_live and sl_live > _entry_live)
+                dir_label = "SHORT" if _live_is_short else "LONG"
+
                 try:
                     r = requests.get(
                         "https://api.kraken.com/0/public/Ticker",

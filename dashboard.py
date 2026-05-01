@@ -17,7 +17,7 @@ RISK_PERCENT   = 0.02
 REWARD_PERCENT = 0.03
 KRAKEN_BASE        = "https://api.kraken.com/0/public"
 KRAKEN_PAIRS = {
-    "ETH": "XETHZUSD", "SOL": "SOLUSD", "AVAX": "AVAXUSD", "XRP": "XXRPZUSD",
+    "ETH": "XETHZUSD", "SOL": "SOLUSD", "LINK": "LINKUSD", "XRP": "XXRPZUSD",
 }
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
@@ -411,7 +411,7 @@ a{color:inherit;text-decoration:none}
 .coin-badge{display:inline-block;font-size:10px;font-family:var(--mono);border-radius:4px;padding:1px 5px;margin-left:4px;vertical-align:middle;font-weight:600}
 .coin-eth {background:rgba(98,126,234,.18);color:#627eea}
 .coin-sol {background:rgba(153,69,255,.18);color:#9945ff}
-.coin-avax{background:rgba(232,65,66,.18);color:#e84142}
+.coin-link{background:rgba(41,182,246,.18);color:#29b6f6}
 .coin-xrp {background:rgba(0,90,212,.18);color:#4da6ff}
 
 /* ── Page Tab Switcher ── */
@@ -572,7 +572,7 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
   <div class="hdr-r">
-    <div class="portfolio-pill" id="hdr-portfolio">$4,000.00</div>
+    <div class="portfolio-pill" id="hdr-portfolio">Loading…</div>
     <div class="hdr-meta"><span class="live-dot"></span><span id="hdr-countdown">Refresh in 60s</span></div>
   </div>
 </header>
@@ -622,7 +622,7 @@ a{color:inherit;text-decoration:none}
       <button class="coin-btn active" data-coin="all"  onclick="setCoinFilter('all')">All</button>
       <button class="coin-btn"        data-coin="ETH"  onclick="setCoinFilter('ETH')">ETH</button>
       <button class="coin-btn"        data-coin="SOL"  onclick="setCoinFilter('SOL')">SOL</button>
-      <button class="coin-btn"        data-coin="AVAX" onclick="setCoinFilter('AVAX')">AVAX</button>
+      <button class="coin-btn"        data-coin="LINK" onclick="setCoinFilter('LINK')">LINK</button>
       <button class="coin-btn"        data-coin="XRP"  onclick="setCoinFilter('XRP')">XRP</button>
       <div class="filter-sep"></div>
       <button class="trades-btn active" id="trades-only-btn" onclick="toggleTradesOnly()">Trades only</button>
@@ -1119,31 +1119,49 @@ function replayCapital(tradeable, capitalStart){
 }
 
 function buildSummaryCoinStats(windowSignals){
+  // Capital, W/L record, win rate, and open positions come ONLY from the server-computed
+  // coinStats (all-time replay from the full CSV). The date window NEVER truncates these
+  // permanent metrics. Window signals are used only to compute the window-scoped P&L delta.
   const baseByCoin = new Map((coinStats || []).map(c=>[c.coin, c]));
   const coins = coinStats.length
     ? coinStats.map(c=>c.coin)
     : [...new Set(signals.map(s=>s.coin).filter(Boolean))].sort();
   return coins.map(coin=>{
     const base = baseByCoin.get(coin) || {coin};
-    const rows = windowSignals.filter(s=>s.coin===coin);
-    const tradeable = rows.filter(s=>s.signal==='Buy'||s.signal==='Sell');
-    const wins = tradeable.filter(s=>s.outcome==='W').length;
-    const losses = tradeable.filter(s=>s.outcome==='L').length;
-    const pendingRows = tradeable.filter(s=>s.outcome==='pending');
-    const capital = replayCapital(tradeable, 1000);
+
+    // All-time values from server (never windowed)
+    const atCapital    = base.capital    != null ? base.capital    : 1000;
+    const atWins       = base.wins       != null ? base.wins       : 0;
+    const atLosses     = base.losses     != null ? base.losses     : 0;
+    const atCompleted  = base.completed  != null ? base.completed  : (atWins + atLosses);
+    const atWinRate    = base.win_rate   != null ? base.win_rate   : (atCompleted > 0 ? +(atWins / atCompleted * 100).toFixed(1) : 0);
+    const atPending    = base.pending    != null ? base.pending    : 0;
+    const atLongsOpen  = base.longs_open != null ? base.longs_open : 0;
+    const atShortsOpen = base.shorts_open!= null ? base.shorts_open: 0;
+    const atOpenTrades = base.open_trades || [];
+
+    // Window-scoped P&L (only used when date filter is not all-time)
+    const windowRows      = windowSignals.filter(s=>s.coin===coin);
+    const windowTradeable = windowRows.filter(s=>s.signal==='Buy'||s.signal==='Sell');
+    const windowPnl       = replayCapital(windowTradeable, 1000) - 1000;
+
     return {
       ...base,
       coin,
-      wins,
-      losses,
-      pending: pendingRows.length,
-      longs_open: pendingRows.filter(s=>(s.direction||'').toUpperCase()==='LONG' || s.signal==='Buy').length,
-      shorts_open: pendingRows.filter(s=>(s.direction||'').toUpperCase()==='SHORT' || s.signal==='Sell').length,
-      completed: wins + losses,
-      win_rate: wins + losses > 0 ? +(wins / (wins + losses) * 100).toFixed(1) : 0,
-      capital,
-      pnl: capital - 1000,
-      signals_total: rows.length,
+      // Permanent all-time metrics — always from server
+      capital:      atCapital,
+      wins:         atWins,
+      losses:       atLosses,
+      completed:    atCompleted,
+      win_rate:     atWinRate,
+      pending:      atPending,
+      longs_open:   atLongsOpen,
+      shorts_open:  atShortsOpen,
+      open_trades:  atOpenTrades,
+      pnl:          atCapital - 1000,
+      // Window-scoped delta (for windowed display mode)
+      window_pnl:   windowPnl,
+      signals_total: windowRows.length,
     };
   });
 }
@@ -1321,7 +1339,7 @@ function drawChart(candles, trade){
 function renderHero(ticker){
   if(!ticker)return;
   livePrice=ticker.price;
-  const coinNameMap = {ETH:'Ethereum', SOL:'Solana', AVAX:'Avalanche', XRP:'XRP'};
+  const coinNameMap = {ETH:'Ethereum', SOL:'Solana', LINK:'Chainlink', XRP:'XRP'};
   const coin = ticker.coin || activeCoin();
   const isUp=ticker.pct>=0;
   const col=isUp?'#00c805':'#ff3b30';
@@ -1340,39 +1358,43 @@ function renderHero(ticker){
 
 // ── Render: Metrics Strip (4 summary cards) ──────────────────────────────────
 function renderMetrics(cs, sigs, meta){
-  const totalCapital = cs.reduce((a,c)=>a+c.capital, 0);
-  const totalOpen    = cs.reduce((a,c)=>a+c.pending, 0);
+  // Capital and open positions always come from server all-time values (never windowed)
+  const totalCapital    = cs.reduce((a,c)=>a+c.capital, 0);
+  const totalOpen       = cs.reduce((a,c)=>a+c.pending, 0);
   const capitalBaseline = 1000 * (cs.length || 4);
-  const pnl          = totalCapital - capitalBaseline;
-  const pnlSign      = pnl > 0 ? '+' : '';
-  const pnlCol       = pnl > 0 ? '#00c805' : pnl < 0 ? '#ff3b30' : '#8e8e93';
+  const allTimePnl      = totalCapital - capitalBaseline;
+  // Window-scoped P&L delta (sum of per-coin window_pnl computed from window signals only)
+  const windowPnlTotal  = cs.reduce((a,c)=>a+(c.window_pnl||0), 0);
+  const displayPnl      = meta.isAllTime ? allTimePnl : windowPnlTotal;
+  const pnlSign         = displayPnl > 0 ? '+' : '';
+  const pnlCol          = displayPnl > 0 ? '#00c805' : displayPnl < 0 ? '#ff3b30' : '#8e8e93';
 
-  // Use canonical live analytics from the coin stats instead of project_log snapshots.
+  // W/L record always from server all-time values
   const atWins   = cs.reduce((a,c)=>a+c.wins, 0);
   const atLosses = cs.reduce((a,c)=>a+c.losses, 0);
   const atWR     = (atWins+atLosses>0 ? atWins/(atWins+atLosses)*100 : 0);
   const atTrades = atWins + atLosses;
   const wrCol    = (atWins+atLosses)===0?'#8e8e93':atWR>=55?'#00c805':atWR>=45?'#ff9f0a':'#ff3b30';
-  const capitalValue = meta.isAllTime ? fmtUSD(totalCapital) : `${pnlSign}${fmtUSD(Math.abs(pnl))}`;
-  const capitalSub = meta.isAllTime ? `${pnlSign}${fmtUSD(Math.abs(pnl))} vs ${fmtUSD(capitalBaseline)} baseline` : `${meta.label} ${cs.length===1 ? activeCoinLabel() : 'across all coins'}`;
+  const capitalValue = meta.isAllTime ? fmtUSD(totalCapital) : `${pnlSign}${fmtUSD(Math.abs(displayPnl))}`;
+  const capitalSub   = meta.isAllTime ? `${pnlSign}${fmtUSD(Math.abs(allTimePnl))} vs ${fmtUSD(capitalBaseline)} baseline` : `${meta.label} ${cs.length===1 ? activeCoinLabel() : 'across all coins'}`;
 
   $('metrics-strip').innerHTML = `
     <div class="met-card">
       <div class="met-label">${meta.capitalLabel}</div>
       <div class="met-val" style="color:${pnlCol}">${capitalValue}</div>
       <div class="met-sub" style="color:${meta.isAllTime ? pnlCol : 'var(--t2)'}">${capitalSub}</div>
-      <div class="met-hint">${meta.isAllTime ? (cs.length===1 ? 'Running capital for the focused coin.' : 'Portfolio total across ETH, SOL, AVAX, and XRP.') : 'Profit and loss for the active window only.'}</div>
+      <div class="met-hint">${meta.isAllTime ? (cs.length===1 ? 'Running capital for the focused coin.' : 'Portfolio total across ETH, SOL, LINK, and XRP.') : 'Profit and loss for the active window only.'}</div>
     </div>
     <div class="met-card">
       <div class="met-label">Win Rate</div>
       <div class="met-val" style="color:${wrCol}">${(atWins+atLosses)>0?fmtNum(atWR,1)+'%':'—'}</div>
       <div class="met-sub">${atWins}w ${atLosses}l</div>
-      <div class="met-hint">Calculated from closed trades in the active scope.</div>
+      <div class="met-hint">All-time win rate from full CSV history.</div>
     </div>
     <div class="met-card">
       <div class="met-label">Open Trades</div>
       <div class="met-val" style="color:${totalOpen>0?'var(--amber)':'#8e8e93'}">${totalOpen}</div>
-      <div class="met-sub">${meta.label} ${cs.length===1 ? activeCoinLabel() : 'across all coins'}</div>
+      <div class="met-sub">all time · ${cs.length===1 ? activeCoinLabel() : 'across all coins'}</div>
       <div class="met-hint">These trades are still live and not counted in win rate.</div>
     </div>
     <div class="met-card">
@@ -1389,14 +1411,17 @@ function renderMetrics(cs, sigs, meta){
 // ── Render: Coin Row (4 per-coin cards) ──────────────────────────────────────
 function renderCoinRow(cs, meta){
   $('coin-row').innerHTML = cs.map(c=>{
-    const pnl      = c.capital - 1000;
-    const capCol   = pnl > 0 ? '#00c805' : pnl < 0 ? '#ff3b30' : '#8e8e93';
-    const wrCol    = c.completed===0?'#8e8e93':c.win_rate>=55?'#00c805':c.win_rate>=45?'#ff9f0a':'#ff3b30';
-    const priceStr = c.current_price ? fmtUSD(c.current_price, c.current_price < 10 ? 4 : 2) : '—';
-    const riskStr  = c.risk_per_trade   ? fmtUSD(c.risk_per_trade,   2) : fmtUSD(c.capital*0.02, 2);
-    const rewStr   = c.reward_per_trade ? fmtUSD(c.reward_per_trade, 2) : fmtUSD(c.capital*0.03, 2);
+    // All-time P&L always from server capital replay
+    const pnl         = c.capital - 1000;
+    // Window-scoped P&L for windowed display mode
+    const displayPnl  = meta.isAllTime ? pnl : (c.window_pnl || 0);
+    const capCol      = pnl > 0 ? '#00c805' : pnl < 0 ? '#ff3b30' : '#8e8e93';
+    const wrCol       = c.completed===0?'#8e8e93':c.win_rate>=55?'#00c805':c.win_rate>=45?'#ff9f0a':'#ff3b30';
+    const priceStr    = c.current_price ? fmtUSD(c.current_price, c.current_price < 10 ? 4 : 2) : '—';
+    const riskStr     = c.risk_per_trade   ? fmtUSD(c.risk_per_trade,   2) : fmtUSD(c.capital*0.02, 2);
+    const rewStr      = c.reward_per_trade ? fmtUSD(c.reward_per_trade, 2) : fmtUSD(c.capital*0.03, 2);
     const primaryLabel = meta.isAllTime ? 'Capital' : `${meta.label} P/L`;
-    const primaryValue = meta.isAllTime ? fmtUSD(c.capital) : `${pnl>0?'+':pnl<0?'-':''}${fmtUSD(Math.abs(pnl))}`;
+    const primaryValue = meta.isAllTime ? fmtUSD(c.capital) : `${displayPnl>0?'+':displayPnl<0?'-':''}${fmtUSD(Math.abs(displayPnl))}`;
     const isActive = coinFilter === c.coin;
     return `<div class="coin-card${isActive?' active':''}" onclick="setCoinFilter('${c.coin}')">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
@@ -1466,28 +1491,39 @@ async function refreshMarketView(){
 }
 
 function computeStatsJS(sigs){
-  const tradeable=sigs.filter(s=>s.signal==='Buy'||s.signal==='Sell');
-  const wins=tradeable.filter(s=>s.outcome==='W').length;
-  const losses=tradeable.filter(s=>s.outcome==='L').length;
-  const pending=tradeable.filter(s=>s.outcome==='pending');
-  const completed=wins+losses;
-  // Replay stored risk/reward amounts; fall back to 2%/3% of running capital
-  let capital=4000;
-  for(const s of tradeable){
-    if(s.outcome==='W') capital+=s.reward_amount?parseFloat(s.reward_amount):capital*0.03;
-    else if(s.outcome==='L') capital-=s.risk_amount?parseFloat(s.risk_amount):capital*0.02;
+  // Use all-time server values for any metric that must not be affected by the date filter.
+  // The date-filtered sigs are used only for window-scoped loss streak computation.
+  const atWins     = (coinStats||[]).reduce((a,c)=>a+(c.wins||0),0);
+  const atLosses   = (coinStats||[]).reduce((a,c)=>a+(c.losses||0),0);
+  const atPending  = (coinStats||[]).reduce((a,c)=>a+(c.pending||0),0);
+  const atCompleted= atWins + atLosses;
+  const atCapital  = (coinStats||[]).reduce((a,c)=>a+(c.capital||1000),0);
+
+  // Loss streak from the full (unfiltered) signals list
+  const allTradeable = signals.filter(s=>s.signal==='Buy'||s.signal==='Sell');
+  let loss_streak=0;
+  for(const b of [...allTradeable].reverse()){
+    if(b.outcome==='L') loss_streak++;
+    else if(b.outcome==='W') break;
   }
+
+  // Open trades list from server (via openTrades global, filtered by coin if needed)
+  const pendingList = coinFilter==='all'
+    ? openTrades
+    : openTrades.filter(t=>t.coin===coinFilter);
+
   return {
-    capital,
-    win_rate: completed>0?(wins/completed*100):0,
-    wins, losses,
-    pending_trades: pending.length,
-    pending_buys: pending.length,
-    total_signals: sigs.length,
-    total_completed: completed,
-    loss_streak: (()=>{let s=0;for(const b of [...tradeable].reverse()){if(b.outcome==='L')s++;else if(b.outcome==='W')break;}return s;})(),
-    open_trades: pending,
-    open_trade: pending[pending.length-1]||null,
+    capital:        atCapital,
+    win_rate:       atCompleted>0?(atWins/atCompleted*100):0,
+    wins:           atWins,
+    losses:         atLosses,
+    pending_trades: atPending,
+    pending_buys:   atPending,
+    total_signals:  sigs.length,
+    total_completed:atCompleted,
+    loss_streak,
+    open_trades:    pendingList,
+    open_trade:     pendingList[pendingList.length-1]||null,
   };
 }
 
@@ -1533,8 +1569,12 @@ function _buildFeedRows(){
   let coinSigs = coinFilter==='all' ? signals : signals.filter(s=>s.coin===coinFilter);
   // tradesOnly: hide DNE
   if(tradesOnly) coinSigs = coinSigs.filter(s=>s.signal!=='Do Not Enter');
-  // date filter
-  coinSigs = applyDateFilter(coinSigs);
+  // date filter — but always keep open (pending) positions regardless of window
+  const openSigs = coinSigs.filter(s=>(s.signal==='Buy'||s.signal==='Sell')&&s.outcome==='pending');
+  const closedAndDne = applyDateFilter(coinSigs.filter(s=>!(s.signal==='Buy'||s.signal==='Sell')||s.outcome!=='pending'));
+  // Merge: open positions always included; dedup by timestamp+coin
+  const seen = new Set(openSigs.map(s=>s.coin+'|'+s.timestamp));
+  coinSigs = [...openSigs, ...closedAndDne.filter(s=>!seen.has(s.coin+'|'+s.timestamp))];
   // feed-tab filter (buy/sell/win/loss/pending/dne/all)
   coinSigs = applyFeedFilter(coinSigs, feedFilter);
   return [...coinSigs].reverse();
@@ -2234,7 +2274,7 @@ function setLrCoin(coin) {
 function renderLearnings() {
   $('lr-loading').style.display = 'none';
   $('lr-content').style.display = 'block';
-  const COINS_ORDER = ['ETH','SOL','XRP','AVAX'];
+  const COINS_ORDER = ['ETH','SOL','XRP','LINK'];
   $('lr-content').innerHTML = `
     <div class="tab-intro">
       <div class="tab-intro-title">How to read Learnings</div>
@@ -2252,9 +2292,11 @@ function renderLearningsCard() {
   if (!area || !lrData) return;
   const cd = lrData[lrCoin];
   if (!cd) { area.innerHTML = `<div class="lr-card"><div class="lr-empty">No learning data for ${lrCoin}.</div></div>`; return; }
+  const csvCompleted = cd.csv_completed != null ? cd.csv_completed : null;
   if (cd.error) { area.innerHTML = `<div class="lr-card"><div class="lr-empty" style="color:var(--red)">Learning data unavailable: ${cd.error}</div></div>`; return; }
   if (!cd.current) {
-    area.innerHTML = `<div class="lr-card"><div class="lr-card-header"><span class="lr-coin-name">${lrCoin}</span></div><div class="lr-empty">No learnings yet — need 10+ completed trades before patterns appear.</div></div>`;
+    const csvNote = csvCompleted != null ? ` (${csvCompleted} completed trades in CSV)` : '';
+    area.innerHTML = `<div class="lr-card"><div class="lr-card-header"><span class="lr-coin-name">${lrCoin}</span></div><div class="lr-empty">No learnings yet — need 10+ completed trades before patterns appear.${csvNote}</div></div>`;
     return;
   }
   const cur = cd.current;
@@ -2275,6 +2317,40 @@ function renderLearningsCard() {
 
   const positivePatterns = patterns.filter(p => (p.win_rate || 0) >= 70).length;
   const cautionPatterns = patterns.filter(p => (p.win_rate || 0) < 40).length;
+  const weightedPatterns = cur.weighted_patterns || [];
+  const regime = cur.regime || null;
+
+  // ── Regime fingerprint ────────────────────────────────────────────────────
+  const regimeHtml = regime ? `
+    <div style="margin-bottom:14px;padding:12px 14px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.08);border-radius:10px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t2);margin-bottom:8px;font-weight:600">Regime Fingerprint (last ${regime.n_trades||0} trades)</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        <div><div style="font-size:10px;color:var(--t2);margin-bottom:2px">Avg ADX</div><div style="font-size:13px;font-family:var(--mono);font-weight:600">${regime.avg_adx!=null?Number(regime.avg_adx).toFixed(1):'—'}</div></div>
+        <div><div style="font-size:10px;color:var(--t2);margin-bottom:2px">Avg RSI</div><div style="font-size:13px;font-family:var(--mono);font-weight:600">${regime.avg_rsi!=null?Number(regime.avg_rsi).toFixed(1):'—'}</div></div>
+        <div><div style="font-size:10px;color:var(--t2);margin-bottom:2px">Avg BB Width</div><div style="font-size:13px;font-family:var(--mono);font-weight:600">${regime.avg_bb_width!=null?Number(regime.avg_bb_width).toFixed(4):'—'}</div></div>
+      </div>
+    </div>` : '';
+
+  // ── Weighted patterns (engine fingerprint keys with penalty) ──────────────
+  const penaltyColor = tag => tag==='STRONG_AVOID'?'var(--red)':tag==='CAUTION'?'var(--amber)':tag==='FAVOR'?'var(--green)':'var(--t2)';
+  const weightedPatternsHtml = weightedPatterns.length ? `
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t2);margin-bottom:8px;font-weight:600">Weighted Pattern Keys (confidence adjustments applied by engine)</div>
+      <table class="lr-table">
+        <thead><tr>
+          <th>Key</th><th>W WR</th><th>Raw</th><th>Penalty</th><th>Tag</th>
+        </tr></thead>
+        <tbody>
+          ${weightedPatterns.map(p => `<tr>
+            <td style="font-family:var(--mono);font-size:11px;color:var(--t1)">${esc(p.key||'')}</td>
+            <td style="color:${(p.win_rate_pct||0)>=60?'var(--green)':(p.win_rate_pct||0)>=40?'var(--amber)':'var(--red)'};font-weight:600">${p.win_rate_pct!=null?p.win_rate_pct+'%':'—'}</td>
+            <td style="color:var(--t2)">${p.raw_count||0}</td>
+            <td style="color:${p.confidence_penalty>0?'var(--red)':p.confidence_penalty<0?'var(--green)':'var(--t2)'};font-weight:600">${p.confidence_penalty!=null?(p.confidence_penalty>0?'-':'')+p.confidence_penalty+'%':'—'}</td>
+            <td><span style="font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:${penaltyColor(p.penalty_tag)}1a;color:${penaltyColor(p.penalty_tag)}">${p.penalty_tag||'—'}</span></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>` : '';
 
   const patternsHtml = patterns.length ? `
     <div class="lr-summary-grid">
@@ -2328,14 +2404,21 @@ function renderLearningsCard() {
       </tbody>
     </table>` : '';
 
+  const lrTradeCount = cur.trade_count || 0;
+  const staleness = csvCompleted != null && csvCompleted > lrTradeCount
+    ? `<span class="lr-meta" style="color:var(--amber)">⚠ ${csvCompleted - lrTradeCount} new trade(s) since last update — learner needs to run</span>`
+    : '';
   area.innerHTML = `<div class="lr-card">
     <div class="lr-card-header">
       <span class="lr-coin-name">${lrCoin}</span>
       <span class="lr-meta">Last updated: ${fmtDateTime(cur.generated_at)}</span>
-      <span class="lr-meta">${cur.trade_count||0} trades analyzed</span>
+      <span class="lr-meta">${lrTradeCount} trades analyzed${csvCompleted != null ? ' ('+csvCompleted+' in CSV)' : ''}</span>
       <span class="lr-meta">${cur.overall_win_rate!=null?cur.overall_win_rate+'%':''} overall WR</span>
+      ${staleness}
     </div>
+    ${regimeHtml}
     ${patternsHtml}
+    ${weightedPatternsHtml}
     <div class="lr-setup">
       <div>Best long setup: <span>${cur.strongest_long_setup||'—'}</span></div>
       <div>Best short setup: <span>${cur.strongest_short_setup||'—'}</span></div>
@@ -2453,8 +2536,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/golive":
             try:
                 log_path = os.path.join(_BASE, "project_log.json")
-                with open(log_path, "r") as f:
-                    project_data = json.load(f)
+                project_data = {}
+                if os.path.exists(log_path):
+                    with open(log_path, "r") as f:
+                        raw = f.read().strip()
+                    if raw:
+                        try:
+                            project_data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            try:
+                                project_data = json.loads(raw[:-1])
+                            except json.JSONDecodeError:
+                                project_data = {}
                 rows_by_coin = dm.load_rows_by_coin()
                 live_summary = dm.get_live_summary(rows_by_coin=rows_by_coin)
                 portfolio = live_summary.get("portfolio", {})
@@ -2470,7 +2563,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         **project_data,
                         "live_stats": live_stats,
                         "live_summary": live_summary,
-                        "session_stats": dm.get_session_stats(project_data, rows_by_coin=rows_by_coin),
+                        "session_stats": dm.get_session_stats(project_data, rows_by_coin=rows_by_coin) if project_data else None,
                     }
                 }, default=str).encode("utf-8")
             except Exception as e:
@@ -2482,7 +2575,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.wfile.write(payload)
 
         elif parsed.path == "/api/learnings":
-            LEARNING_COINS = ["ETH", "SOL", "XRP", "AVAX"]
+            LEARNING_COINS = ["ETH", "SOL", "XRP", "LINK"]
+            rows_by_coin = dm.load_rows_by_coin()
+            csv_completed = {
+                coin: len([r for r in dm._closed_trade_rows(dm._trade_rows(rows_by_coin.get(coin, [])))])
+                for coin in LEARNING_COINS
+            }
             result = {}
             for coin in LEARNING_COINS:
                 prefix = coin.lower()
@@ -2490,11 +2588,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 hist_path = os.path.join(_BASE, f"{prefix}_learning_history.json")
                 coin_data = {}
                 if not os.path.exists(cur_path):
-                    result[coin] = {"current": None, "history": []}
+                    result[coin] = {"current": None, "history": [], "csv_completed": csv_completed.get(coin, 0)}
                     continue
                 try:
                     with open(cur_path, "r") as f:
-                        coin_data["current"] = json.load(f)
+                        raw_content = f.read().strip()
+                    if not raw_content:
+                        result[coin] = {"current": None, "history": [], "csv_completed": csv_completed.get(coin, 0)}
+                        continue
+                    coin_data["current"] = json.loads(raw_content)
                 except Exception as e:
                     coin_data["error"] = str(e)
                     result[coin] = coin_data
@@ -2504,6 +2606,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         coin_data["history"] = json.load(f)
                 except Exception:
                     coin_data["history"] = []
+                coin_data["csv_completed"] = csv_completed.get(coin, 0)
                 result[coin] = coin_data
             payload = json.dumps({"ok": True, "data": result}, default=str).encode("utf-8")
             self.send_response(200)
@@ -2514,9 +2617,19 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         elif parsed.path == "/api/project":
             try:
-                log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "project_log.json")
-                with open(log_path, "r") as f:
-                    project_data = json.load(f)
+                log_path = os.path.join(_BASE, "project_log.json")
+                project_data = {}
+                if os.path.exists(log_path):
+                    with open(log_path, "r") as f:
+                        raw = f.read().strip()
+                    if raw:
+                        try:
+                            project_data = json.loads(raw)
+                        except json.JSONDecodeError:
+                            try:
+                                project_data = json.loads(raw[:-1])
+                            except json.JSONDecodeError:
+                                project_data = {}
                 rows_by_coin = dm.load_rows_by_coin()
                 payload = json.dumps(
                     {
@@ -2524,7 +2637,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                         "data": {
                             **project_data,
                             "live_summary": dm.get_live_summary(rows_by_coin=rows_by_coin),
-                            "session_stats": dm.get_session_stats(project_data, rows_by_coin=rows_by_coin),
+                            "session_stats": dm.get_session_stats(project_data, rows_by_coin=rows_by_coin) if project_data else None,
                         },
                     },
                     default=str,
@@ -2565,7 +2678,7 @@ if __name__ == "__main__":
     server = ReusableTCPServer(("localhost", PORT), DashboardHandler)
     threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
     print(f"Dashboard: {url}")
-    print("Coins:     ETH | SOL | AVAX | XRP")
+    print("Coins:     ETH | SOL | LINK | XRP")
     print("Ctrl+C to stop.\n")
     try:
         server.serve_forever()

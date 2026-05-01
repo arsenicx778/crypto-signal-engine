@@ -1,8 +1,0 @@
-[
-  {
-    "timestamp": "2026-04-20 15:36 PT",
-    "trade_count": 10,
-    "overall_win_rate": 50,
-    "summary": "LONG trades dominate the dataset with a 56% win rate when ADX > 35, indicating trend strength is critical. The strongest pattern is LONG entries with large DI+ > DI- gaps (\u226510 points) and ADX > 30, which achieved 100% win rate. Conversely, LONG trades with ADX < 25 failed 75% of the time. Avoid RSI > 65 overbought conditions and extreme sentiment readings; neutral-to-positive sentiment performs best."
-  }
-]

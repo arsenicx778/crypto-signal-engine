@@ -1,14 +1,32 @@
 [
   {
-    "timestamp": "2026-04-16 23:58 PT",
-    "trade_count": 17,
-    "overall_win_rate": 53,
-    "summary": "Positive sentiment (>= +0.15) is the strongest predictive filter with 100% win rate but limited sample. For negative/neutral sentiment periods, require strong trend (ADX >= 38), large DI+ gap (>= 15 points), and positive MACD momentum to justify entries. Weak ADX (< 25) during negative sentiment should be avoided entirely. The brain should weight sentiment strongly in entry decisions and use ADX/DI divergence as confirmation rather than standalone signals."
+    "timestamp": "2026-04-29 11:08 PT",
+    "trade_count": 10,
+    "overall_win_rate": 40,
+    "summary": "Win rate of 40% is driven by a critical insight: LONG trades succeed primarily when RSI is in the 50\u201359 neutral zone with low sentiment (\u22640.15) and weak trend momentum (ADX < 15). Avoid LONG above RSI 60 and at elevated sentiment (\u22650.42)\u2014these combinations are 0% winners. DNE signals are filtering too aggressively and should be recalibrated to avoid missing high-probability setups in the identified favorable conditions."
   },
   {
-    "timestamp": "2026-04-20 15:36 PT",
-    "trade_count": 39,
-    "overall_win_rate": 33,
-    "summary": "The brain demonstrates a strong LONG bias with 20W-19L on long trades vs 1W-7L on shorts, indicating directional strength only works in uptrend regime. The highest-probability setup requires confluence of strong trend (ADX > 35), momentum confirmation (RSI 50-70, MACD >= 0), and neutral-to-negative sentiment bias\u2014avoid chasing during sentiment extremes above +0.15. Never initiate trades in low-ADX (<20) environments regardless of other signals."
+    "timestamp": "2026-04-29 11:08 PT",
+    "trade_count": 10,
+    "overall_win_rate": 40,
+    "summary": "SOL shows a critical vulnerability to overbought LONG entries (RSI > 60) and excessively bullish sentiment (>= 0.50), both correlating with 0% win rates. The best LONG setups occur in the RSI 50-60 range with weak trend confirmation (ADX < 15), achieving 60% win rate. DNE signals at 80% miss rate appear overly conservative\u2014the strategy is exiting before strong reversal trades materialize, particularly during low-conviction environments. Consider tightening DNE filters or adding MACD confirmation to reduce false signal generation."
+  },
+  {
+    "timestamp": "2026-05-01 15:08 PT",
+    "trade_count": 13,
+    "overall_win_rate": 38,
+    "summary": "SOL shows a 38% win rate with clear weaknesses in LONG trades above RSI 60 and during elevated sentiment (> 0.40). SHORT trades with strong DI- advantage and low RSI offer the only reliable edge (67% win rate). The DNE signal miss rate of 48.6% suggests signals are appropriately cautious rather than too conservative; the real issue is LONG direction bias in unfavorable conditions (overbought RSI, high sentiment) which should be filtered out entirely."
+  },
+  {
+    "timestamp": "2026-05-01 15:08 PT",
+    "trade_count": 13,
+    "overall_win_rate": 38,
+    "summary": "The portfolio suffers from LONG bias in elevated sentiment environments (0.42+) where all trades have failed, and from overbought RSI entries (>60) with zero wins. The only profitable pattern is SHORT trades in oversold conditions (RSI <40) with dominant DI-, achieving 67% accuracy. DNE signals show 47.4% miss rate, suggesting they are appropriately cautious rather than too conservative\u2014the market is simply difficult. Immediate action: eliminate LONG entries when sentiment > 0.42 or RSI > 60, and focus SHORT opportunities on RSI <40 setups."
+  },
+  {
+    "timestamp": "2026-05-01 15:08 PT",
+    "trade_count": 13,
+    "overall_win_rate": 38,
+    "summary": "The portfolio suffers from overtrading LONG entries in overbought or high-sentiment regimes (0% wins above RSI 60 or sentiment >0.42). SHORT trades with trend confirmation (ADX >25) and bearish structure (DI- dominance, low RSI) show clear 67% edge. DNE signal miss rate of 46% suggests the signal is appropriately cautious rather than overly conservative\u2014it correctly avoids many whipsaw scenarios but leaves real opportunities on the table. Focus future entries on SHORT setups and low-ADX LONG mean reversions, and eliminate LONG when market shows momentum."
   }
 ]

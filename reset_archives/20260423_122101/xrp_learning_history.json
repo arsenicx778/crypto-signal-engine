@@ -1,0 +1,8 @@
+[
+  {
+    "timestamp": "2026-04-23 12:06 PT",
+    "trade_count": 35,
+    "overall_win_rate": 51,
+    "summary": "The dataset reveals a clear LONG bias with 51% overall wins, but success is highly conditional. The strongest LONG setups require both DI+ dominance (>45) and low DI- (<25) combined with positive-to-neutral sentiment, yielding 67-75% win rates. SHORT trades are consistently unprofitable at 40% win rate regardless of conditions. The DNE signal miss rate of 56.5% suggests the signal filter is too conservative; relaxing it slightly could capture more valid LONG opportunities, especially during moderate-trend, positive-sentiment environments where the data shows strong edge."
+  }
+]

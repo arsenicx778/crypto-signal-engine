@@ -1,0 +1,17 @@
+{
+  "last_updated": "2026-04-27 00:28:46",
+  "cycle_counter": 626,
+  "coins": {
+    "ETH": {
+      "capital": 888.6299999999999,
+      "open_longs": 14,
+      "open_shorts": 4,
+      "last_learn_cycle": 0,
+      "consecutive_losses": 2,
+      "last_signal_direction": "",
+      "last_signal_time": ""
+    },
+    "SOL": {
+      "capital": 1070.8700000000001,
+      "open_longs": 6,
+      

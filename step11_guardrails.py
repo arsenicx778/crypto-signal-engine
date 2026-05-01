@@ -1,5 +1,6 @@
 import os
 import json
+from config import ENABLE_SHORTS
 
 
 def _parse_indicators_str(indicator_str: str) -> dict:
@@ -48,9 +49,15 @@ def _load_learning(coin: str) -> dict:
     path = os.path.join(script_dir, f"{coin.lower()}_learning.json")
     if not os.path.exists(path):
         return {}
+    # Treat a zero-byte or whitespace-only file the same as missing
     try:
+        if os.path.getsize(path) == 0:
+            return {}
         with open(path) as f:
-            return json.load(f)
+            content = f.read().strip()
+        if not content:
+            return {}
+        return json.loads(content)
     except Exception:
         return {}
 
@@ -59,6 +66,19 @@ def apply_guardrails(signal_result, filtered_indicators=None):
     signal = signal_result["data"]
     overrides = []
     guardrail_log = []
+    coin = str(signal.get("coin", signal.get("symbol", ""))).upper().replace("USDT", "").replace("-", "") or "?"
+
+    # ── Shorts disabled — block before any other processing ──────────────────
+    if signal["signal"] == "Sell" and not ENABLE_SHORTS:
+        print(f"[GUARD:{coin}] SHORT signal blocked — ENABLE_SHORTS=False")
+        overrides.append("SHORT signal blocked — ENABLE_SHORTS=False")
+        signal["signal"] = "Do Not Enter"
+        signal["entry_price"] = None
+        signal["stop_loss"] = None
+        signal["take_profit"] = None
+        signal["reasoning"]["decision_rationale"] += " [OVERRIDDEN: SHORT signal blocked — ENABLE_SHORTS=False]"
+        signal["guardrail_log"] = guardrail_log
+        return {"success": True, "data": signal, "overrides": overrides}
 
     # ── Shared: confidence check ─────────────────────────────────────────────
     if signal["confidence"] < 60:
@@ -115,7 +135,8 @@ def apply_guardrails(signal_result, filtered_indicators=None):
 
     # ── Dynamic confidence decay (permanent rules must pass first) ───────────
     if signal["signal"] in ("Buy", "Sell"):
-        coin = str(signal.get("coin", signal.get("symbol", ""))).upper().replace("USDT", "").replace("-", "")
+        coin = str(signal.get("coin", signal.get("symbol", ""))).upper().replace("USDT", "").replace("-", "") or coin
+
         learning = _load_learning(coin) if coin else {}
 
         if learning:
@@ -130,6 +151,7 @@ def apply_guardrails(signal_result, filtered_indicators=None):
             direction = "LONG" if signal["signal"] == "Buy" else "SHORT"
             pattern_key = _classify_pattern_key(direction, ind)
             guardrail_log.append(f"pattern_key={pattern_key}")
+            print(f"[GUARD:{coin}] key: {pattern_key or 'UNCLASSIFIABLE (missing indicators)'}")
 
             if pattern_key:
                 weighted_patterns = learning.get("weighted_patterns", [])
@@ -183,6 +205,10 @@ def apply_guardrails(signal_result, filtered_indicators=None):
                         f"penalty={penalty} adjusted={adjusted_confidence}"
                     )
 
+                    tag = matched.get("penalty_tag", "")
+                    print(f"[GUARD:{coin}] match: {tag} -{penalty:.0f}pts | "
+                          f"{original_confidence} → {adjusted_confidence:.0f}")
+
                     if adjusted_confidence < 60:
                         reason = (
                             f"Learning penalty blocked signal: "
@@ -192,6 +218,7 @@ def apply_guardrails(signal_result, filtered_indicators=None):
                         )
                         overrides.append(reason)
                         guardrail_log.append(f"BLOCKED: {reason}")
+                        print(f"[GUARD:{coin}] BLOCKED below 60 — learning penalty applied")
                         signal["signal"] = "Do Not Enter"
                         signal["entry_price"] = None
                         signal["stop_loss"] = None
@@ -202,12 +229,16 @@ def apply_guardrails(signal_result, filtered_indicators=None):
                         guardrail_log.append(
                             f"PASSED: confidence updated to {adjusted_confidence}"
                         )
+                        print(f"[GUARD:{coin}] PASSED — confidence {adjusted_confidence:.0f}% after penalty")
                 else:
                     guardrail_log.append(f"pattern_not_found: no weighted pattern for key={pattern_key}")
+                    print(f"[GUARD:{coin}] no match | confidence unchanged {signal['confidence']} | PASSED")
             else:
                 guardrail_log.append("pattern_key=None: insufficient indicators to classify")
+                print(f"[GUARD:{coin}] key: UNCLASSIFIABLE — missing indicators, no penalty applied")
         else:
             guardrail_log.append(f"learning_file_missing_or_empty: coin={coin}")
+            print(f"[GUARD:{coin}] no learning file — no penalty applied, confidence unchanged")
 
     signal["guardrail_log"] = guardrail_log
     return {"success": True, "data": signal, "overrides": overrides}

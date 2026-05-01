@@ -50,13 +50,19 @@ MIN_NEW_TRADES = 3
 MAX_TRADES_TO_ANALYZE = 40
 MIN_TOTAL_TRADES_FOR_LEARNING = 10
 
+# Per-coin overrides: lower the minimum if a coin is newer/less active
+_MIN_TRADES_OVERRIDE = {
+    "LINK": 5,
+    "XRP": 6,
+}
+
 # ── coin config ───────────────────────────────────────────────────────────────
 
 COIN_CSV = {
     "ETH":  "eth_signals.csv",
     "SOL":  "sol_signals.csv",
     "XRP":  "xrp_signals.csv",
-    "AVAX": "avax_signals.csv",
+    "LINK": "link_signals.csv",
     "LINK": "link_signals.csv",
 }
 
@@ -68,10 +74,16 @@ def state_path(coin: str) -> str:
 def learning_path(coin: str) -> str:
     return f"{coin.lower()}_learning.json"
 
+def learning_history_path(coin: str) -> str:
+    return f"{coin.lower()}_learning_history.json"
+
+def initial_state() -> dict:
+    return {"last_run_time": None, "last_trade_count": 0, "processed_trade_keys": []}
+
 def read_state(coin: str) -> dict:
     path = state_path(coin)
     if not os.path.exists(path):
-        return {"last_run_time": None, "last_trade_count": 0, "processed_trade_keys": []}
+        return initial_state()
     try:
         with open(path) as f:
             state = json.load(f)
@@ -80,7 +92,7 @@ def read_state(coin: str) -> dict:
             state.setdefault("processed_trade_keys", [])
             return state
     except Exception:
-        return {"last_run_time": None, "last_trade_count": 0, "processed_trade_keys": []}
+        return initial_state()
 
 def write_state(coin: str, trade_count: int, processed_trade_keys: Optional[list] = None):
     state = {
@@ -90,6 +102,37 @@ def write_state(coin: str, trade_count: int, processed_trade_keys: Optional[list
     }
     with open(state_path(coin), "w") as f:
         json.dump(state, f, indent=2)
+
+def reset_learning_for_coin(coin: str):
+    with open(state_path(coin), "w") as f:
+        json.dump(initial_state(), f, indent=2)
+
+    for path in (learning_path(coin), learning_history_path(coin)):
+        if os.path.exists(path):
+            os.remove(path)
+
+    print(f"[LEARN:{coin}] Reset learner state, learning output, and history.")
+
+def discover_resettable_coins() -> list:
+    tracked = []
+    for coin, csv_file in COIN_CSV.items():
+        if (
+            os.path.exists(csv_file)
+            or os.path.exists(state_path(coin))
+            or os.path.exists(learning_path(coin))
+            or os.path.exists(learning_history_path(coin))
+        ):
+            tracked.append(coin)
+    return tracked or ["ETH", "SOL", "XRP", "LINK"]
+
+def reset_learning_for_coins(coins: list):
+    seen = []
+    for coin in coins:
+        coin = str(coin or "").upper().strip()
+        if not coin or coin in seen:
+            continue
+        seen.append(coin)
+        reset_learning_for_coin(coin)
 
 def completed_trade_key(row: dict) -> str:
     return str(row.get("timestamp", "")).strip()
@@ -466,22 +509,48 @@ Include 3-6 patterns. Only include a pattern if it has at least 3 observations.
 Be specific with numbers (e.g. sentiment > 0.50 not high sentiment).
 """
 
-    try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        raw = response.content[0].text.strip()
+    def _parse_haiku_response(raw: str) -> dict:
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        raw = raw.strip()
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"[LEARN:{coin}] Haiku returned invalid JSON: {e}")
-        return None
+        return json.loads(raw.strip())
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = response.content[0].text.strip()
+        try:
+            return _parse_haiku_response(raw)
+        except json.JSONDecodeError as e:
+            print(f"[LEARN:{coin}] JSON parse failed — retrying with truncated input (last 10 trades only)")
+            retry_trades = trades[-10:]
+            retry_total = len(retry_trades)
+            retry_wins = sum(1 for t in retry_trades if t["outcome"] == "W")
+            retry_losses = retry_total - retry_wins
+            retry_text = format_trades_for_haiku(retry_trades)
+            retry_prompt = (
+                f"Analyze {retry_total} {coin} trades ({retry_wins}W {retry_losses}L). "
+                f"Format: DIRECTION,CONFIDENCE,OUTCOME,RSI,ADX,DI+,DI-,SENT,MACD,BB\n"
+                f"{retry_text}\n\n"
+                f"Return ONLY this JSON structure, no other text:\n"
+                f'{{"trade_count":{retry_total},"overall_win_rate":{round(retry_wins/retry_total*100) if retry_total else 0},'
+                f'"patterns":[],"strongest_long_setup":"","strongest_short_setup":"","summary":""}}'
+            )
+            retry_response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4000,
+                messages=[{"role": "user", "content": retry_prompt}]
+            )
+            retry_raw = retry_response.content[0].text.strip()
+            try:
+                return _parse_haiku_response(retry_raw)
+            except json.JSONDecodeError as e2:
+                print(f"[LEARN:{coin}] Haiku retry also returned invalid JSON: {e2}")
+                return None
     except Exception as e:
         print(f"[LEARN:{coin}] Haiku call failed: {e}")
         return None
@@ -511,7 +580,7 @@ def write_learning(coin: str, patterns: dict, weighted_patterns: list = None,
     with open(path, "w") as f:
         json.dump(output, f, indent=2)
 
-    history_path = f"{coin.lower()}_learning_history.json"
+    history_path = learning_history_path(coin)
     history = []
     if os.path.exists(history_path):
         try:
@@ -587,14 +656,30 @@ def format_learning_for_brain(coin: str) -> str:
 # ── main entry points ─────────────────────────────────────────────────────────
 
 def run_learning_for_coin(coin: str) -> bool:
+    from config import LIVE_LEARNING_ENABLED
+    if not LIVE_LEARNING_ENABLED:
+        print(f"[LEARN:{coin}] live learning disabled — skipping "
+              f"(set LIVE_LEARNING_ENABLED=True to re-enable)")
+        return False
+
     csv_file = COIN_CSV.get(coin)
     if not csv_file or not os.path.exists(csv_file):
         return False
     state = read_state(coin)
     completed_rows = load_completed_trades(csv_file)
     current_count = len(completed_rows)
-    if current_count < MIN_TOTAL_TRADES_FOR_LEARNING:
-        print(f"[LEARN:{coin}] Only {current_count} completed trades, need {MIN_TOTAL_TRADES_FOR_LEARNING}. Skipping.")
+
+    last_count = state.get("last_trade_count", 0)
+    if current_count == last_count:
+        print(f"[LEARN:{coin}] {current_count} trades, same as last run — skipping Haiku narrative")
+        write_state(coin, current_count, state.get("processed_trade_keys"))
+        return False
+
+    print(f"[LEARN:{coin}] {current_count} trades (was {last_count}) — running full learning cycle")
+
+    min_trades = _MIN_TRADES_OVERRIDE.get(coin, MIN_TOTAL_TRADES_FOR_LEARNING)
+    if current_count < min_trades:
+        print(f"[LEARN:{coin}] Only {current_count} completed trades, need {min_trades}. Skipping.")
         return False
     new_trade_keys = get_new_completed_trade_keys(state, completed_rows)
     new_trades = len(new_trade_keys)
@@ -625,6 +710,18 @@ def run_learning_for_coin(coin: str) -> bool:
     patterns = call_haiku_for_patterns(coin, trades, dne_analysis=dne_analysis)
     if not patterns:
         return False
+
+    # ── [LEARN] compare against existing keys to count updated vs new ────────
+    existing_path = learning_path(coin)
+    try:
+        with open(existing_path) as _f:
+            _existing = json.load(_f)
+        existing_keys = {p["key"] for p in _existing.get("weighted_patterns", [])}
+    except Exception:
+        existing_keys = set()
+    new_keys  = {p["key"] for p in weighted_patterns} - existing_keys
+    upd_keys  = {p["key"] for p in weighted_patterns} & existing_keys
+
     write_learning(coin, patterns,
                    weighted_patterns=weighted_patterns,
                    regime=regime,
@@ -634,6 +731,27 @@ def run_learning_for_coin(coin: str) -> bool:
         current_count,
         [completed_trade_key(row) for row in completed_rows],
     )
+
+    # ── [LEARN] summary log ───────────────────────────────────────────────────
+    top3 = sorted(weighted_patterns, key=lambda p: p["confidence_penalty"], reverse=True)[:3]
+    top3_str = " | ".join(
+        f"{p['key']} {p['win_rate_pct']:.0f}%WR {p['raw_count']}trades -{p['confidence_penalty']}pts"
+        for p in top3
+    ) if top3 else "none"
+    regime_str = (
+        f"ADX:{regime.get('avg_adx', 0):.1f} RSI:{regime.get('avg_rsi', 0):.1f}"
+        if regime else "N/A"
+    )
+    dne_miss = dne_analysis.get("miss_rate", None) if dne_analysis else None
+    dne_str = f"{dne_miss*100:.0f}%" if dne_miss is not None else "N/A"
+    print(
+        f"[LEARN:{coin}] {len(trades)} trades analyzed | "
+        f"{len(upd_keys)} patterns updated {len(new_keys)} new | "
+        f"top penalty: {top3_str} | "
+        f"regime {regime_str} | "
+        f"DNE miss rate: {dne_str}"
+    )
+
     return True
 
 def run_learning_cycle(coins: list, cycle_number: int, every_n_cycles: int = 10):
@@ -649,12 +767,28 @@ def run_learning_cycle(coins: list, cycle_number: int, every_n_cycles: int = 10)
 # ── standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import sys
-    coin = sys.argv[1].upper() if len(sys.argv) > 1 else "ETH"
-    print(f"[LEARN] Running standalone learner for {coin}...")
-    result = run_learning_for_coin(coin)
-    if result:
-        print("\nLearning output:\n")
-        print(format_learning_for_brain(coin))
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run or reset the learning engine.")
+    parser.add_argument("coin", nargs="?", default="ETH", help="Coin symbol, e.g. ETH")
+    parser.add_argument("--reset", action="store_true", help="Reset the specified coin's learning state and files")
+    parser.add_argument("--reset-all", action="store_true", help="Reset all tracked coins' learning state and files")
+    args = parser.parse_args()
+
+    if args.reset_all:
+        coins = discover_resettable_coins()
+        print(f"[LEARN] Resetting learner data for: {', '.join(coins)}")
+        reset_learning_for_coins(coins)
+    elif args.reset:
+        coin = args.coin.upper()
+        print(f"[LEARN] Resetting learner data for {coin}...")
+        reset_learning_for_coin(coin)
     else:
-        print("Skipped (see reason above)")
+        coin = args.coin.upper()
+        print(f"[LEARN] Running standalone learner for {coin}...")
+        result = run_learning_for_coin(coin)
+        if result:
+            print("\nLearning output:\n")
+            print(format_learning_for_brain(coin))
+        else:
+            print("Skipped (see reason above)")

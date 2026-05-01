@@ -1,0 +1,11 @@
+{
+  "last_updated": "2026-04-24 00:48:51",
+  "cycle_counter": 208,
+  "coins": {
+    "ETH": {
+      "capital": 1000.0,
+      "open_longs": 0,
+      "open_shorts": 0,
+      "last_learn_cycle": 0,
+      "consecutive_losses": 0,
+      

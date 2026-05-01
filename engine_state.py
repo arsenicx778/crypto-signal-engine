@@ -7,7 +7,7 @@ import pandas as pd
 from time_utils import now_pacific_str
 
 STATE_FILE = "engine_state.json"
-COINS = ["ETH", "SOL", "XRP", "AVAX"]
+COINS = ["ETH", "SOL", "XRP", "LINK"]
 DEFAULT_CAPITAL = 1000.0
 
 

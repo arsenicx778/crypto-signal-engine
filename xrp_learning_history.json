@@ -1,14 +1,26 @@
 [
   {
-    "timestamp": "2026-04-20 15:36 PT",
-    "trade_count": 28,
-    "overall_win_rate": 61,
-    "summary": "XRP longs significantly outperform shorts (63% vs 50% win rate). The strongest long signal combines ADX > 27 with a DI+ dominance of 10+ points and RSI in the 49-65 range; avoid RSI > 65 extremes. Shorts should only be considered during clear downtrends with DI- dominance and never during bullish sentiment > +0.30. Respect the ADX threshold of 27+ for directional trades to filter out low-conviction setups."
+    "timestamp": "2026-04-28 23:03 PT",
+    "trade_count": 9,
+    "overall_win_rate": 22,
+    "summary": "The strategy suffers from 78% losses driven primarily by weak LONG setups that ignore overbought RSI conditions. SHORT trades show marginal edge (50% on proper ADX/DI alignment). The DNE signal miss rate of 17.6% appears appropriately cautious given the strategy's overall poor performance\u2014the issue is not signal generation but entry condition design. Recommend eliminating LONG trades until RSI and DI strength filters are implemented, and focus exclusively on SHORT setups with DI- > 38."
   },
   {
-    "timestamp": "2026-04-21 17:00 PT",
-    "trade_count": 31,
-    "overall_win_rate": 55,
-    "summary": "XRP LONG trades outperform SHORT significantly (67% win rate vs 44%), with the strongest setup combining moderate trend strength (ADX 27-40), clear directional dominance (DI+ gap 10+), mid-range momentum (RSI 49-62), and positive sentiment. Avoid LONG entries in overbought RSI > 60 territory where reversals spike; SHORT positions lack statistical edge and should be deprioritized."
+    "timestamp": "2026-05-01 15:09 PT",
+    "trade_count": 13,
+    "overall_win_rate": 15,
+    "summary": "The 85% loss rate (11L-2W) is primarily driven by two critical failures: (1) trading when MACD is flat/near-zero, indicating no momentum acceleration across all 11 losses, and (2) forcing LONG entries in low-ADX environments where trend strength is absent. The only winning trades were SHORT positions with strong ADX (>35), clear DI- dominance, and bearish sentiment alignment. The DNE signal miss rate of 6.2% is appropriately cautious given the overall system weakness\u2014the real issue is trade selection, not DNE filtering. Implement mandatory MACD > \u00b10.01 threshold and require ADX > 35 minimum for all direction entries before considering DNE adjustments."
+  },
+  {
+    "timestamp": "2026-05-01 15:09 PT",
+    "trade_count": 13,
+    "overall_win_rate": 15,
+    "summary": "XRP trading strategy has fundamental directional bias issues: LONG entries are consistently failing regardless of confidence levels, while SHORT entries with strong ADX confirmation show perfect execution. The brain should immediately halt LONG signals and focus exclusively on SHORT trades meeting the high ADX + clear DI- dominance criteria. DNE signals are appropriately calibrated at 93.8% accuracy and should not be loosened."
+  },
+  {
+    "timestamp": "2026-05-01 15:09 PT",
+    "trade_count": 13,
+    "overall_win_rate": 15,
+    "summary": "The trading system is heavily skewed toward LONG losses (0% win rate on 8 trades) while SHORT trades show promise (50% win rate, 2 wins). Critical issue: ADX < 27 SHORT trades are catastrophic (0-5 record). The DNE signal analysis at 6.2% miss rate appears appropriately cautious given the system's overall fragility; however, this is overshadowed by the core problem that LONG direction should be suspended entirely until signal logic is overhauled. Focus resources on optimizing SHORT setups in the ADX 25-40 sweet spot."
   }
 ]

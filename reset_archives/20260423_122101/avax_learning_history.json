@@ -1,0 +1,8 @@
+[
+  {
+    "timestamp": "2026-04-23 12:04 PT",
+    "trade_count": 11,
+    "overall_win_rate": 55,
+    "summary": "AVAX trading shows a clear directional bias toward LONG entries in strong trending conditions (ADX >= 35 with DI+ gap >= 5), which achieve 75% win rates. Weak trends (ADX < 25) are a major loss driver with only 20% win rate on LONGs. The DNE signal system is excessively conservative, missing 70% of winning opportunities; recommend recalibration to capture more high-ADX setups."
+  }
+]

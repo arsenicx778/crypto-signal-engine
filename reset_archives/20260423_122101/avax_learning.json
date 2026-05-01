@@ -1,0 +1,150 @@
+{
+  "coin": "AVAX",
+  "generated_at": "2026-04-23 12:04 PT",
+  "trade_count": 11,
+  "overall_win_rate": 55,
+  "patterns": [
+    {
+      "condition": "LONG with ADX >= 35 and DI+ > DI- gap >= 5",
+      "wins": 3,
+      "losses": 1,
+      "win_rate": 75,
+      "recommendation": "Prioritize LONG entries when ADX is strong (>=35) with clear directional dominance (DI+ at least 5 points above DI-).",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "LONG with ADX < 25 (weak trend)",
+      "wins": 1,
+      "losses": 4,
+      "win_rate": 20,
+      "recommendation": "Avoid LONG entries when ADX < 25; weak trend conditions correlate strongly with losses.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "RSI > 65 (overbought territory)",
+      "wins": 0,
+      "losses": 1,
+      "win_rate": 0,
+      "recommendation": "Exercise extreme caution on LONG entries when RSI > 65; insufficient samples but shows concerning pattern.",
+      "confidence": "medium",
+      "sample_size_note": "Only 1 observation (RSI 67.1); expand monitoring"
+    },
+    {
+      "condition": "LONG with SENTIMENT >= +0.70",
+      "wins": 1,
+      "losses": 1,
+      "win_rate": 50,
+      "recommendation": "High sentiment alone does not guarantee wins; combine with strong ADX and DI divergence for confirmation.",
+      "confidence": "low",
+      "sample_size_note": null
+    },
+    {
+      "condition": "SHORT positions (all attempts)",
+      "wins": 1,
+      "losses": 1,
+      "win_rate": 50,
+      "recommendation": "SHORT setup has minimal edge; focus trading activity on LONG entries where directional bias favors wins.",
+      "confidence": "low",
+      "sample_size_note": "Only 2 SHORT trades; insufficient data"
+    },
+    {
+      "condition": "LONG with DI+ gap (DI+ minus DI-) >= 20",
+      "wins": 2,
+      "losses": 1,
+      "win_rate": 67,
+      "recommendation": "Strong DI+ dominance (gap >=20) combined with ADX >= 35 is a high-confidence setup; prioritize this confluence.",
+      "confidence": "high",
+      "sample_size_note": null
+    }
+  ],
+  "weighted_patterns": [
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.892,
+      "weighted_losses": 0.264,
+      "raw_count": 4,
+      "weighted_win_rate": 0.7716,
+      "win_rate_pct": 77.2,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.669,
+      "weighted_losses": 0.388,
+      "raw_count": 2,
+      "weighted_win_rate": 0.6329,
+      "win_rate_pct": 63.3,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.389,
+      "weighted_losses": 0.0,
+      "raw_count": 1,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.41,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.506,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 0.506,
+      "weighted_losses": 0.0,
+      "raw_count": 1,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_high|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.646,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    }
+  ],
+  "strongest_long_setup": "LONG when ADX >= 35, DI+ > DI- with gap >= 5, RSI between 55-62, and positive or neutral SENTIMENT. This setup won 3 of 4 attempts (75% win rate).",
+  "strongest_short_setup": "Insufficient edge detected. Only 2 SHORT trades with 50% win rate. Current data does not support SHORT bias; recommend focusing on LONG directional trades.",
+  "summary": "AVAX trading shows a clear directional bias toward LONG entries in strong trending conditions (ADX >= 35 with DI+ gap >= 5), which achieve 75% win rates. Weak trends (ADX < 25) are a major loss driver with only 20% win rate on LONGs. The DNE signal system is excessively conservative, missing 70% of winning opportunities; recommend recalibration to capture more high-ADX setups.",
+  "regime": {
+    "avg_adx": 29.2919,
+    "avg_rsi": 54.9998,
+    "avg_bb_width": null,
+    "n_trades": 11,
+    "captured_at": "2026-04-23T12:03:59.405862-07:00"
+  },
+  "dne_analysis": {
+    "missed_opportunity": 19,
+    "correct_dne": 8,
+    "total_dne": 27,
+    "miss_rate": 0.7037
+  }
+}

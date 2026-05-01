@@ -1,65 +1,72 @@
 {
   "coin": "SOL",
-  "generated_at": "2026-04-20 15:36 PT",
-  "trade_count": 39,
-  "overall_win_rate": 33,
+  "generated_at": "2026-05-01 23:14 UTC",
+  "source": "historical_bootstrap",
+  "candles_analyzed": 721,
+  "trade_count": 43,
+  "overall_win_rate": 47,
   "patterns": [
     {
-      "condition": "LONG with SENTIMENT between -0.35 and -0.15 (negative/neutral bias)",
-      "wins": 5,
-      "losses": 11,
-      "win_rate": 31,
-      "recommendation": "Avoid or reduce position size on LONG trades when sentiment is slightly negative; this regime has shown poor edge.",
-      "confidence": "high",
-      "sample_size_note": null
-    },
-    {
-      "condition": "LONG with RSI > 60 AND DI+ > DI- gap >= 10",
-      "wins": 5,
-      "losses": 8,
-      "win_rate": 39,
-      "recommendation": "This shows marginal edge; require additional confluence (positive sentiment or ADX > 35) before entering.",
-      "confidence": "medium",
-      "sample_size_note": null
-    },
-    {
-      "condition": "LONG with ADX > 35 AND RSI between 50-70 AND MACD >= 0",
-      "wins": 4,
-      "losses": 2,
-      "win_rate": 67,
-      "recommendation": "This is the strongest long setup; prioritize entries matching all three criteria for highest probability trades.",
-      "confidence": "high",
-      "sample_size_note": null
-    },
-    {
-      "condition": "LONG with SENTIMENT >= +0.15 (positive bias)",
-      "wins": 3,
-      "losses": 9,
-      "win_rate": 25,
-      "recommendation": "Avoid LONG trades during strongly positive sentiment (>0.15); market tends to pullback after sentiment extremes.",
-      "confidence": "high",
-      "sample_size_note": null
-    },
-    {
-      "condition": "SHORT trades regardless of conditions",
+      "condition": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg",
       "wins": 1,
-      "losses": 7,
-      "win_rate": 13,
-      "recommendation": "Avoid SHORT trades entirely; insufficient edge and poor win rate; focus exclusively on LONG directional bias.",
-      "confidence": "high",
-      "sample_size_note": null
+      "losses": 5,
+      "win_rate": 16,
+      "recommendation": "Avoid this setup \u2014 17% historical win rate, negative edge.",
+      "confidence": "medium",
+      "sample_size_note": "6 historical occurrences"
     },
     {
-      "condition": "LONG with low ADX (< 20) AND RSI 49-65",
-      "wins": 3,
-      "losses": 7,
-      "win_rate": 30,
-      "recommendation": "Avoid entries in low-trend environments; require ADX > 25 to confirm directional conviction before risking capital.",
+      "condition": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg",
+      "wins": 2,
+      "losses": 3,
+      "win_rate": 40,
+      "recommendation": "Avoid this setup \u2014 40% historical win rate, negative edge.",
       "confidence": "medium",
-      "sample_size_note": null
+      "sample_size_note": "5 historical occurrences"
+    },
+    {
+      "condition": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "wins": 6,
+      "losses": 4,
+      "win_rate": 60,
+      "recommendation": "Favor this setup \u2014 60% historical win rate over 10 trades.",
+      "confidence": "medium",
+      "sample_size_note": "10 historical occurrences"
     }
   ],
-  "strongest_long_setup": "LONG when ADX > 35, RSI 50-70, MACD >= 0, DI+ > DI- by at least 10 points, and SENTIMENT between -0.35 and +0.15. This setup achieved 67% win rate (4W-2L).",
-  "strongest_short_setup": "SHORT trades show insufficient edge with only 13% win rate (1W-7L). Recommend avoiding SHORT direction entirely and focusing capital on high-conviction LONG setups only.",
-  "summary": "The brain demonstrates a strong LONG bias with 20W-19L on long trades vs 1W-7L on shorts, indicating directional strength only works in uptrend regime. The highest-probability setup requires confluence of strong trend (ADX > 35), momentum confirmation (RSI 50-70, MACD >= 0), and neutral-to-negative sentiment bias\u2014avoid chasing during sentiment extremes above +0.15. Never initiate trades in low-ADX (<20) environments regardless of other signals."
+  "weighted_patterns": [
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 1.0,
+      "weighted_losses": 5.0,
+      "raw_count": 6,
+      "weighted_win_rate": 0.1667,
+      "win_rate_pct": 16.7,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 2.0,
+      "weighted_losses": 3.0,
+      "raw_count": 5,
+      "weighted_win_rate": 0.4,
+      "win_rate_pct": 40.0,
+      "confidence_penalty": 15,
+      "penalty_tag": "AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 6.0,
+      "weighted_losses": 4.0,
+      "raw_count": 10,
+      "weighted_win_rate": 0.6,
+      "win_rate_pct": 60.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    }
+  ],
+  "strongest_long_setup": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos (60% WR)",
+  "strongest_short_setup": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg (40% WR)",
+  "summary": "Bootstrap from 721 historical 5-minute candles. 43 simulated trades, 47% win rate. 3 pattern keys with 5+ occurrences. Use these as starting priors; live trading will refine them."
 }
