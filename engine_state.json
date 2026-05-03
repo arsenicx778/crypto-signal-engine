@@ -1,31 +1,31 @@
 {
-  "last_updated": "2026-05-03 10:47:40",
-  "cycle_counter": 1682,
+  "last_updated": "2026-05-03 15:14:51",
+  "cycle_counter": 1699,
   "coins": {
     "ETH": {
-      "capital": 852.83,
-      "open_longs": 21,
-      "open_shorts": 6,
+      "capital": 628.0500000000005,
+      "open_longs": 37,
+      "open_shorts": 27,
       "last_learn_cycle": 0,
       "consecutive_losses": 0,
       "last_signal_direction": "",
       "last_signal_time": ""
     },
     "SOL": {
-      "capital": 968.3400000000001,
-      "open_longs": 9,
-      "open_shorts": 2,
+      "capital": 998.2399999999999,
+      "open_longs": 11,
+      "open_shorts": 4,
       "last_learn_cycle": 0,
-      "consecutive_losses": 5,
+      "consecutive_losses": 0,
       "last_signal_direction": "",
       "last_signal_time": ""
     },
     "XRP": {
-      "capital": 1018.1999999999999,
-      "open_longs": 4,
-      "open_shorts": 2,
+      "capital": 766.1899999999999,
+      "open_longs": 8,
+      "open_shorts": 7,
       "last_learn_cycle": 0,
-      "consecutive_losses": 0,
+      "consecutive_losses": 13,
       "last_signal_direction": "",
       "last_signal_time": ""
     },
@@ -35,6 +35,15 @@
       "open_shorts": 1,
       "last_learn_cycle": 0,
       "consecutive_losses": 0,
+      "last_signal_direction": "",
+      "last_signal_time": ""
+    },
+    "LINK": {
+      "capital": 940.8,
+      "open_longs": 5,
+      "open_shorts": 0,
+      "last_learn_cycle": 0,
+      "consecutive_losses": 3,
       "last_signal_direction": "",
       "last_signal_time": ""
     }
