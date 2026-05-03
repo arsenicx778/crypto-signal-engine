@@ -59,12 +59,9 @@ def _penalty_and_tag(win_rate: float):
 # ── Bootstrap builder ──────────────────────────────────────────────────────────
 
 # Minimum occurrences per pattern key.
-# With Kraken's free-tier giving ~30 days of 1h data and 40–50 trades,
-# keys are spread across ~8 buckets; using 5 preserves statistical signal
-# while keeping patterns that have real observations.
-# The source='historical_bootstrap' field lets the live system know these
-# are prior-based and should decay as live trades accumulate.
-MIN_OCCURRENCES = 5
+# 10-19: LOW_CONFIDENCE (included with halved penalty)
+# 20+:   HIGH confidence (full penalty applied)
+MIN_OCCURRENCES = 20
 
 
 def generate_bootstrap_learning(coin_name: str,
@@ -112,15 +109,29 @@ def generate_bootstrap_learning(coin_name: str,
         else:
             buckets[key]["losses"] += 1
 
-    # Filter to patterns with MIN_OCCURRENCES+
+    # Filter to patterns with at least 10 occurrences
+    # 10-19: LOW_CONFIDENCE (halved penalty)
+    # 20+:   HIGH confidence (full penalty)
     weighted_patterns = []
+    excluded_count = 0
+    low_conf_count = 0
+    high_conf_count = 0
     for key, counts in buckets.items():
         total = counts["wins"] + counts["losses"]
-        if total < MIN_OCCURRENCES:
+        if total < 10:
+            excluded_count += 1
             continue
 
         wr = counts["wins"] / total
         penalty, tag = _penalty_and_tag(wr)
+
+        if total < 20:
+            confidence_level = "LOW_CONFIDENCE"
+            penalty = penalty / 2
+            low_conf_count += 1
+        else:
+            confidence_level = "HIGH"
+            high_conf_count += 1
 
         weighted_patterns.append({
             "key":               key,
@@ -131,6 +142,7 @@ def generate_bootstrap_learning(coin_name: str,
             "win_rate_pct":      round(wr * 100, 1),
             "confidence_penalty": penalty,
             "penalty_tag":       tag,
+            "confidence_level":  confidence_level,
         })
 
     # Sort: highest penalty first (most dangerous patterns at the top)
@@ -147,14 +159,16 @@ def generate_bootstrap_learning(coin_name: str,
         else:
             rec = f"Avoid this setup — {wr_pct:.0f}% historical win rate, negative edge."
 
+        conf_label = "high" if p["raw_count"] >= 20 else "low"
         patterns_narrative.append({
             "condition":        p["key"],
             "wins":             int(p["weighted_wins"]),
             "losses":           int(p["weighted_losses"]),
             "win_rate":         int(wr_pct),
             "recommendation":   rec,
-            "confidence":       "high" if p["raw_count"] >= 50 else "medium",
-            "sample_size_note": f"{p['raw_count']} historical occurrences",
+            "confidence":       conf_label,
+            "confidence_level": p.get("confidence_level", "HIGH"),
+            "sample_size_note": f"{p['raw_count']} historical occurrences [{p.get('confidence_level', 'HIGH')}]",
         })
 
     # Overall stats
@@ -190,9 +204,10 @@ def generate_bootstrap_learning(coin_name: str,
         "strongest_long_setup":  strongest_long,
         "strongest_short_setup": strongest_short,
         "summary": (
-            f"Bootstrap from {candles_n:,} historical 5-minute candles. "
+            f"Bootstrap from {candles_n:,} historical candles. "
             f"{total_trades} simulated trades, {overall_wr}% win rate. "
-            f"{len(weighted_patterns)} pattern keys with {MIN_OCCURRENCES}+ occurrences. "
+            f"{high_conf_count} pattern keys with 20+ occurrences (HIGH confidence), "
+            f"{low_conf_count} with 10-19 (LOW_CONFIDENCE). "
             f"Use these as starting priors; live trading will refine them."
         ),
     }
@@ -201,10 +216,9 @@ def generate_bootstrap_learning(coin_name: str,
     with open(path, "w") as f:
         json.dump(output, f, indent=2)
 
-    qualifying = len(weighted_patterns)
     print(
         f"[BOOTSTRAP:{coin_name}] {candles_n:,} candles analyzed — "
-        f"{qualifying} pattern keys with {MIN_OCCURRENCES}+ occurrences — "
+        f"{high_conf_count} HIGH (20+) + {low_conf_count} LOW_CONFIDENCE (10-19) pattern keys — "
         f"learning file written"
     )
 

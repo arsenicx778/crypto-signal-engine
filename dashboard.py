@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from datetime import datetime
 import requests
 import dashboard_metrics as dm
+import importlib
 
 PORT               = 8765
 COIN_CAPITAL_START = dm.COIN_CAPITAL_START
@@ -559,9 +560,39 @@ a{color:inherit;text-decoration:none}
 @media(max-width:700px){
   .lr-summary-grid{grid-template-columns:1fr}
 }
+
+/* ── Engine Paused Banner ── */
+.paused-banner{display:none;background:rgba(255,159,10,.12);border-bottom:2px solid rgba(255,159,10,.4);padding:11px 20px;text-align:center;color:var(--amber)}
+.paused-banner.show{display:block}
+.paused-banner-title{font-size:14px;font-weight:700;letter-spacing:.03em;margin-bottom:2px}
+.paused-banner-sub{font-size:12px;opacity:.85}
+
+/* ── Backtest Results Tab ── */
+.bt-section{padding:20px 20px 0}
+.bt-section-title{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--t2);font-weight:600;margin-bottom:12px}
+.bt-cards{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--sep);border-radius:12px;overflow:hidden;margin-bottom:20px}
+.bt-card{padding:16px 18px;border-right:1px solid var(--sep)}
+.bt-card:last-child{border-right:none}
+.bt-card-label{font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}
+.bt-card-val{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;font-family:var(--mono)}
+.bt-card-sub{font-size:11px;color:var(--t2);margin-top:3px}
+.bt-table{width:100%;border-collapse:collapse;margin-bottom:20px}
+.bt-table th{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--t2);text-align:left;padding:8px 14px;font-weight:500;border-bottom:1px solid var(--sep)}
+.bt-table td{padding:10px 14px;border-bottom:1px solid var(--sep);font-size:13px;font-family:var(--mono);vertical-align:middle}
+.bt-table tr:hover td{background:rgba(255,255,255,.02)}
+.bt-empty{padding:48px 20px;text-align:center}
+.bt-empty-title{font-size:16px;font-weight:600;margin-bottom:8px}
+.bt-empty-sub{font-size:13px;color:var(--t2);line-height:1.6;max-width:480px;margin:0 auto}
+.bt-empty-cmd{display:inline-block;margin-top:12px;background:var(--s2);border:1px solid var(--sep);border-radius:8px;padding:8px 16px;font-family:var(--mono);font-size:13px;color:var(--green)}
+.lr-source-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 7px;border-radius:4px;background:rgba(41,182,246,.15);color:#29b6f6;margin-left:6px}
 </style>
 </head>
 <body>
+
+<div class="paused-banner" id="paused-banner">
+  <div class="paused-banner-title">&#9888; ENGINE PAUSED — Historical validation in progress</div>
+  <div class="paused-banner-sub">Live trading disabled &nbsp;|&nbsp; Monitor running &nbsp;|&nbsp; Existing positions being watched</div>
+</div>
 
 <header class="hdr">
   <div class="hdr-l">
@@ -573,7 +604,7 @@ a{color:inherit;text-decoration:none}
   </div>
   <div class="hdr-r">
     <div class="portfolio-pill" id="hdr-portfolio">Loading…</div>
-    <div class="hdr-meta"><span class="live-dot"></span><span id="hdr-countdown">Refresh in 60s</span></div>
+    <div class="hdr-meta"><span class="live-dot" id="live-dot"></span><span id="hdr-countdown">Refresh in 60s</span></div>
   </div>
 </header>
 
@@ -583,6 +614,7 @@ a{color:inherit;text-decoration:none}
     <button class="page-tab" id="tab-project" onclick="switchTab('project')">Project</button>
     <button class="page-tab" id="tab-golive" onclick="switchTab('golive')">Readiness</button>
     <button class="page-tab" id="tab-learnings" onclick="switchTab('learnings')">Learnings</button>
+    <button class="page-tab" id="tab-backtest" onclick="switchTab('backtest')">Backtest</button>
   </div>
 
   <div id="loading" class="loading"><div class="spin"></div><br>Loading&hellip;</div>
@@ -693,6 +725,12 @@ a{color:inherit;text-decoration:none}
   <div id="learnings-view" style="display:none">
     <div id="lr-loading" class="loading"><div class="spin"></div><br>Loading learnings&hellip;</div>
     <div id="lr-content" style="display:none"></div>
+  </div>
+
+  <!-- Backtest Results Tab -->
+  <div id="backtest-view" style="display:none">
+    <div id="bt-loading" class="loading"><div class="spin"></div><br>Loading backtest data&hellip;</div>
+    <div id="bt-content" style="display:none"></div>
   </div>
 
 </div><!-- /page -->
@@ -1751,12 +1789,20 @@ document.getElementById('periods').addEventListener('click',async e=>{
 
 // ── Main Load ─────────────────────────────────────────────────────────────────
 async function loadAll(){
-  const [sigRes, coinsRes, ticker, candles] = await Promise.all([
+  const [sigRes, coinsRes, ticker, candles, cfgRes] = await Promise.all([
     fetch('/api/data').then(r=>r.json()).catch(()=>null),
     fetch('/api/coins').then(r=>r.json()).catch(()=>null),
     fetchTicker(),
     fetchCandles(period),
+    fetch('/api/config').then(r=>r.json()).catch(()=>null),
   ]);
+
+  // Show/hide paused banner based on live trading flag
+  const paused = cfgRes && cfgRes.ok && !cfgRes.live_trading_enabled;
+  const banner = $('paused-banner');
+  if(banner){ banner.classList.toggle('show', paused); }
+  const dot = $('live-dot');
+  if(dot){ dot.style.background = paused ? 'var(--amber)' : 'var(--green)'; }
 
   if(!sigRes){ $('loading').innerHTML='<div style="color:#ff3b30">Error loading signals</div>'; return; }
 
@@ -1817,13 +1863,16 @@ function switchTab(tab) {
   $('tab-project').classList.toggle('active', tab === 'project');
   $('tab-golive').classList.toggle('active', tab === 'golive');
   $('tab-learnings').classList.toggle('active', tab === 'learnings');
+  $('tab-backtest').classList.toggle('active', tab === 'backtest');
   $('app').style.display = tab === 'live' ? 'block' : 'none';
   $('project-view').style.display = tab === 'project' ? 'block' : 'none';
   $('golive-view').style.display = tab === 'golive' ? 'block' : 'none';
   $('learnings-view').style.display = tab === 'learnings' ? 'block' : 'none';
+  $('backtest-view').style.display = tab === 'backtest' ? 'block' : 'none';
   if (tab === 'project') loadProjectStatus();
   if (tab === 'golive') loadGoLive();
   if (tab === 'learnings') loadLearnings();
+  if (tab === 'backtest') loadBacktest();
 }
 
 // ── Project Status ─────────────────────────────────────────────────────────────
@@ -2408,9 +2457,10 @@ function renderLearningsCard() {
   const staleness = csvCompleted != null && csvCompleted > lrTradeCount
     ? `<span class="lr-meta" style="color:var(--amber)">⚠ ${csvCompleted - lrTradeCount} new trade(s) since last update — learner needs to run</span>`
     : '';
+  const sourceTag = cur.source ? `<span class="lr-source-tag">${esc(cur.source)}</span>` : '';
   area.innerHTML = `<div class="lr-card">
     <div class="lr-card-header">
-      <span class="lr-coin-name">${lrCoin}</span>
+      <span class="lr-coin-name">${lrCoin}</span>${sourceTag}
       <span class="lr-meta">Last updated: ${fmtDateTime(cur.generated_at)}</span>
       <span class="lr-meta">${lrTradeCount} trades analyzed${csvCompleted != null ? ' ('+csvCompleted+' in CSV)' : ''}</span>
       <span class="lr-meta">${cur.overall_win_rate!=null?cur.overall_win_rate+'%':''} overall WR</span>
@@ -2433,6 +2483,101 @@ function toggleLrHistory(el) {
   const showing = tbl.style.display === 'table';
   tbl.style.display = showing ? 'none' : 'table';
   el.textContent = showing ? el.textContent.replace('Hide','Show') : el.textContent.replace('Show','Hide');
+}
+
+// ── Backtest Results Tab ──────────────────────────────────────────────────────
+async function loadBacktest() {
+  $('bt-loading').style.display = 'block';
+  $('bt-content').style.display = 'none';
+  try {
+    const r = await fetch('/api/backtest', {signal: AbortSignal.timeout(5000)});
+    const d = await r.json();
+    if (!r.ok || !d.ok) { $('bt-loading').innerHTML = '<div style="color:var(--red)">Error loading backtest data</div>'; return; }
+    renderBacktest(d.data);
+  } catch(e) {
+    $('bt-loading').innerHTML = '<div style="color:var(--red)">Error loading backtest data</div>';
+  }
+}
+
+function renderBacktest(data) {
+  $('bt-loading').style.display = 'none';
+  $('bt-content').style.display = 'block';
+
+  if (!data || !data.has_results) {
+    $('bt-content').innerHTML = `
+      <div class="bt-empty">
+        <div class="bt-empty-title">No backtest results yet</div>
+        <div class="bt-empty-sub">Run the bootstrap backtester to generate historical performance data for all four coins. Results will appear here automatically.</div>
+        <div class="bt-empty-cmd">python run_bootstrap.py</div>
+      </div>`;
+    return;
+  }
+
+  const coins = data.coin_results || [];
+  const bt = data.latest_run || {};
+  const COINS = ['ETH','SOL','XRP','LINK'];
+
+  const coinRowsHtml = COINS.map(coin => {
+    const cr = coins.find(c => c.coin === coin) || {};
+    const wr = cr.win_rate != null ? cr.win_rate + '%' : '—';
+    const pf = cr.profit_factor != null ? Number(cr.profit_factor).toFixed(2) : '—';
+    const dd = cr.max_drawdown_pct != null ? cr.max_drawdown_pct + '%' : '—';
+    const tr = cr.total_trades != null ? cr.total_trades : '—';
+    const liveWr = cr.live_win_rate != null ? cr.live_win_rate + '%' : '—';
+    const wrCol = cr.win_rate >= 60 ? 'var(--green)' : cr.win_rate >= 45 ? 'var(--amber)' : 'var(--red)';
+    const diff = (cr.win_rate != null && cr.live_win_rate != null) ? (cr.live_win_rate - cr.win_rate).toFixed(1) : null;
+    const diffStr = diff != null ? (diff > 0 ? `<span style="color:var(--green)">+${diff}%</span>` : diff < 0 ? `<span style="color:var(--red)">${diff}%</span>` : '<span style="color:var(--t2)">0%</span>') : '—';
+    return `<tr>
+      <td><span class="coin-badge coin-${coin.toLowerCase()}">${coin}</span></td>
+      <td style="color:${wrCol};font-weight:600">${wr}</td>
+      <td>${pf}</td>
+      <td style="color:${cr.max_drawdown_pct>15?'var(--red)':cr.max_drawdown_pct>10?'var(--amber)':'var(--green)'}">${dd}</td>
+      <td>${tr}</td>
+      <td>${liveWr}</td>
+      <td>${diffStr}</td>
+    </tr>`;
+  }).join('');
+
+  // Top/worst patterns from bootstrap learning files
+  const patternSections = (data.pattern_summaries || []).map(ps => {
+    const best5 = (ps.patterns || []).slice(0, 5);
+    const worst5 = (ps.patterns || []).slice(-5).reverse();
+    const mkRows = rows => rows.map(p => `<tr>
+      <td style="font-size:11px">${esc(p.condition||p.key||'')}</td>
+      <td style="color:${(p.win_rate||0)>=60?'var(--green)':(p.win_rate||0)>=40?'var(--amber)':'var(--red)'};font-weight:600">${p.win_rate!=null?p.win_rate+'%':'—'}</td>
+      <td>${p.wins||0}W / ${p.losses||0}L</td>
+    </tr>`).join('');
+    return `<div class="bt-section">
+      <div class="bt-section-title">${ps.coin} — Pattern Keys</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
+        <div>
+          <div style="font-size:11px;color:var(--green);font-weight:600;text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Top 5 Best Patterns</div>
+          <table class="bt-table"><thead><tr><th>Key</th><th>WR</th><th>Record</th></tr></thead><tbody>${mkRows(best5)}</tbody></table>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--red);font-weight:600;text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Top 5 Worst Patterns</div>
+          <table class="bt-table"><thead><tr><th>Key</th><th>WR</th><th>Record</th></tr></thead><tbody>${mkRows(worst5)}</tbody></table>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  $('bt-content').innerHTML = `
+    <div class="tab-intro">
+      <div class="tab-intro-title">Backtest Results</div>
+      <div class="tab-intro-copy">Historical bootstrap performance from simulated trades on past OHLCV data. Compare backtest vs live win rates to verify the strategy is performing as expected.</div>
+    </div>
+    <div class="bt-section">
+      <div class="bt-section-title">Run: ${bt.run_date || '—'}</div>
+      <table class="bt-table">
+        <thead><tr>
+          <th>Coin</th><th>Backtest WR</th><th>Profit Factor</th><th>Max Drawdown</th><th>Sim Trades</th><th>Live WR</th><th>Diff</th>
+        </tr></thead>
+        <tbody>${coinRowsHtml}</tbody>
+      </table>
+    </div>
+    ${patternSections}
+  `;
 }
 </script>
 </body>
@@ -2609,6 +2754,84 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 coin_data["csv_completed"] = csv_completed.get(coin, 0)
                 result[coin] = coin_data
             payload = json.dumps({"ok": True, "data": result}, default=str).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        elif parsed.path == "/api/config":
+            try:
+                import config as _cfg
+                importlib.reload(_cfg)
+                payload = json.dumps({
+                    "ok": True,
+                    "live_trading_enabled": getattr(_cfg, "LIVE_TRADING_ENABLED", True),
+                    "live_trading_pause_reason": getattr(_cfg, "LIVE_TRADING_PAUSE_REASON", ""),
+                    "live_learning_enabled": getattr(_cfg, "LIVE_LEARNING_ENABLED", True),
+                    "historical_learning_enabled": getattr(_cfg, "HISTORICAL_LEARNING_ENABLED", False),
+                }).encode("utf-8")
+            except Exception as e:
+                payload = json.dumps({"ok": False, "error": str(e)}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        elif parsed.path == "/api/backtest":
+            try:
+                bt_dir = os.path.join(_BASE, "backtest_results")
+                rows_by_coin = dm.load_rows_by_coin()
+                live_coin_stats = {
+                    cs["coin"]: cs["win_rate"]
+                    for cs in dm.get_all_coin_stats(rows_by_coin=rows_by_coin)
+                }
+                if not os.path.exists(bt_dir):
+                    payload = json.dumps({"ok": True, "data": {"has_results": False}}).encode("utf-8")
+                else:
+                    report_files = sorted(
+                        [f for f in os.listdir(bt_dir) if f.endswith(".json")],
+                        reverse=True,
+                    )
+                    if not report_files:
+                        payload = json.dumps({"ok": True, "data": {"has_results": False}}).encode("utf-8")
+                    else:
+                        with open(os.path.join(bt_dir, report_files[0]), "r") as f:
+                            latest = json.load(f)
+                        coin_results = []
+                        for c in ["ETH", "SOL", "XRP", "LINK"]:
+                            cr = latest.get("coins", {}).get(c, {})
+                            cr["coin"] = c
+                            cr["live_win_rate"] = live_coin_stats.get(c)
+                            coin_results.append(cr)
+                        # Pattern summaries from bootstrap learning files
+                        pattern_summaries = []
+                        for c in ["ETH", "SOL", "XRP", "LINK"]:
+                            lf = os.path.join(_BASE, f"{c.lower()}_learning.json")
+                            if os.path.exists(lf):
+                                try:
+                                    with open(lf, "r") as f:
+                                        ld = json.load(f)
+                                    pats = sorted(
+                                        ld.get("patterns", []),
+                                        key=lambda p: p.get("win_rate", 0),
+                                        reverse=True,
+                                    )
+                                    pattern_summaries.append({"coin": c, "patterns": pats})
+                                except Exception:
+                                    pass
+                        payload = json.dumps({
+                            "ok": True,
+                            "data": {
+                                "has_results": True,
+                                "latest_run": {"run_date": latest.get("run_date", report_files[0])},
+                                "coin_results": coin_results,
+                                "pattern_summaries": pattern_summaries,
+                            },
+                        }, default=str).encode("utf-8")
+            except Exception as e:
+                payload = json.dumps({"ok": False, "error": str(e)}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))

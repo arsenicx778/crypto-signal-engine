@@ -165,11 +165,19 @@ def apply_guardrails(signal_result, filtered_indicators=None):
                         f"raw_count={raw_count} wr={matched.get('weighted_win_rate')}"
                     )
 
-                    # Staleness check 1: too few raw trades
-                    if raw_count < 5:
+                    # Confidence level check
+                    confidence_level = matched.get("confidence_level", "HIGH")
+                    if confidence_level == "LOW_CONFIDENCE":
                         penalty = penalty / 2
                         guardrail_log.append(
-                            f"staleness_halve: raw_count={raw_count} < 5, penalty halved to {penalty}"
+                            f"low_confidence_pattern: halving penalty to {penalty}"
+                        )
+
+                    # Staleness check 1: too few raw trades
+                    if raw_count < 10:
+                        penalty = penalty / 2
+                        guardrail_log.append(
+                            f"staleness_halve: raw_count={raw_count} < 10, penalty halved to {penalty}"
                         )
 
                     # Staleness check 2: regime drift

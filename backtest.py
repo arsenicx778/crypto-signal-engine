@@ -1,18 +1,22 @@
 """
 backtest.py
 
-Simulates the signal engine's entry logic on historical 5-minute candles
+Simulates the signal engine's entry logic on historical candles
 with ATR-based stops and forward-scan outcome resolution.
 
+Primary backtest: 4-hour candles, MAX_HOLD_CANDLES = 6 (24 hours)
+Secondary backtest: daily candles, MAX_HOLD_CANDLES_DAILY = 5 (5 days)
+
 Rules (applied in order per candle):
-  Skip LONG if: daily BEARISH, 4h BEARISH, ADX<15 or ADX>28, RSI>60, DI->DI+
+  Skip LONG if: daily BEARISH, ADX<14 or ADX>35, RSI>62, DI->DI+
   Skip SHORT if: daily BULLISH, RSI<35
-  Direction: DI+ > DI- by >8 pts AND 1h BULLISH/NEUTRAL → LONG
-             DI- > DI+ by >8 pts AND 1h BEARISH/NEUTRAL → SHORT
+  Direction: DI+ > DI- by >6 pts AND htf_trend_1h in (BULLISH, NEUTRAL) → LONG
+             DI- > DI+ by >6 pts AND htf_trend_1h in (BEARISH, NEUTRAL) → SHORT
              else DNE
   SL:  ATR × 1.5 below entry (LONG) / above entry (SHORT)
   TP:  entry + (SL distance × 1.5) for LONG / entry - (SL distance × 1.5) for SHORT
-  Max hold: 96 candles (8 hours)
+  Max hold (4h): 6 candles (24 hours)
+  Max hold (daily): 5 candles (5 days)
   One trade at a time per coin.
 """
 
@@ -21,14 +25,15 @@ import numpy as np
 from typing import Optional
 
 
-MAX_HOLD_CANDLES = 24    # 24 hours on 1h data (8 hours on 5m)
-ATR_MULTIPLIER   = 1.5
-RR_RATIO         = 1.5
-MIN_ADX_LONG     = 14
-MAX_ADX_LONG     = 35
-MAX_RSI_LONG     = 62
-MIN_RSI_SHORT    = 35
-DI_GAP_MIN       = 6.0
+MAX_HOLD_CANDLES       = 6    # 4-hour candles → 24 hours
+MAX_HOLD_CANDLES_DAILY = 5    # daily candles  → 5 days
+ATR_MULTIPLIER         = 1.5
+RR_RATIO               = 1.5
+MIN_ADX_LONG           = 14
+MAX_ADX_LONG           = 35
+MAX_RSI_LONG           = 62
+MIN_RSI_SHORT          = 35
+DI_GAP_MIN             = 6.0
 
 
 def _direction(row: pd.Series) -> Optional[str]:
@@ -56,14 +61,12 @@ def _passes_filters(row: pd.Series, direction: str) -> bool:
     di_plus  = row.get("di_plus")
     di_minus = row.get("di_minus")
     trend_d  = row.get("htf_trend_daily", "NEUTRAL")
-    trend_4h = row.get("htf_trend_4h", "NEUTRAL")
 
     if pd.isna(rsi) or pd.isna(adx) or pd.isna(di_plus) or pd.isna(di_minus):
         return False
 
     if direction == "LONG":
         if trend_d  == "BEARISH": return False
-        if trend_4h == "BEARISH": return False
         if adx < MIN_ADX_LONG or adx > MAX_ADX_LONG: return False
         if rsi > MAX_RSI_LONG: return False
         if di_minus > di_plus: return False
@@ -102,7 +105,7 @@ def _resolve_trade(entry_price: float, sl: float, tp: float,
 
 def run_backtest(coin_name: str, df: pd.DataFrame) -> pd.DataFrame:
     """
-    Simulate signal logic on every 5-minute candle.
+    Simulate signal logic on 4-hour candles.
 
     df must have columns: timestamp, open, high, low, close, volume,
     rsi, adx, di_plus, di_minus, atr, macd,
@@ -121,7 +124,6 @@ def run_backtest(coin_name: str, df: pd.DataFrame) -> pd.DataFrame:
         print(f"[BACKTEST:{coin_name}] Missing columns: {missing}. Aborting.")
         return pd.DataFrame()
 
-    # Drop rows where key indicators are NaN (warm-up period)
     valid_mask  = df[needed].notna().all(axis=1)
     if not valid_mask.any():
         print(f"[BACKTEST:{coin_name}] All indicator rows are NaN — not enough data.")
@@ -159,7 +161,6 @@ def run_backtest(coin_name: str, df: pd.DataFrame) -> pd.DataFrame:
             sl = entry + sl_dist
             tp = entry - tp_dist
 
-        # Look forward up to MAX_HOLD_CANDLES
         future = df.iloc[idx + 1: idx + 1 + MAX_HOLD_CANDLES]
         if future.empty:
             break
@@ -167,7 +168,6 @@ def run_backtest(coin_name: str, df: pd.DataFrame) -> pd.DataFrame:
         outcome, candles_held = _resolve_trade(entry, sl, tp, direction, future)
 
         if outcome == "TIMEOUT":
-            # Close at the last candle's close
             exit_price = future.iloc[-1]["close"]
             outcome = "W" if (
                 (direction == "LONG"  and exit_price > entry) or
@@ -207,6 +207,116 @@ def run_backtest(coin_name: str, df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(trades)
 
 
+def run_backtest_daily(coin_name: str, df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Simulate signal logic on daily candles.
+
+    df must have columns: timestamp, open, high, low, close, volume,
+    rsi, adx, di_plus, di_minus, atr, macd,
+    htf_trend_daily (3-bar rolling self-trend)
+    htf_trend_1h is set to NEUTRAL (daily is already the slowest frame)
+
+    Returns a DataFrame of simulated trades.
+    """
+    df = df.reset_index(drop=True)
+
+    # Ensure htf_trend_1h is always NEUTRAL for daily frame
+    df = df.copy()
+    df["htf_trend_1h"] = "NEUTRAL"
+
+    trades = []
+    in_trade = False
+    trade_end_idx = -1
+
+    needed = ["rsi", "adx", "di_plus", "di_minus", "atr"]
+    missing = [c for c in needed if c not in df.columns]
+    if missing:
+        print(f"[BACKTEST_DAILY:{coin_name}] Missing columns: {missing}. Aborting.")
+        return pd.DataFrame()
+
+    valid_mask  = df[needed].notna().all(axis=1)
+    if not valid_mask.any():
+        print(f"[BACKTEST_DAILY:{coin_name}] All indicator rows are NaN — not enough data.")
+        return pd.DataFrame()
+    valid_start = valid_mask.idxmax()
+
+    for idx in range(valid_start, len(df) - 1):
+        if in_trade and idx <= trade_end_idx:
+            continue
+        in_trade = False
+
+        row = df.iloc[idx]
+        if row[list(needed)].isna().any():
+            continue
+
+        direction = _direction(row)
+        if direction is None:
+            continue
+
+        if not _passes_filters(row, direction):
+            continue
+
+        atr = row["atr"]
+        if pd.isna(atr) or atr <= 0:
+            continue
+
+        entry = row["close"]
+        sl_dist = atr * ATR_MULTIPLIER
+        tp_dist = sl_dist * RR_RATIO
+
+        if direction == "LONG":
+            sl = entry - sl_dist
+            tp = entry + tp_dist
+        else:
+            sl = entry + sl_dist
+            tp = entry - tp_dist
+
+        future = df.iloc[idx + 1: idx + 1 + MAX_HOLD_CANDLES_DAILY]
+        if future.empty:
+            break
+
+        outcome, candles_held = _resolve_trade(entry, sl, tp, direction, future)
+
+        if outcome == "TIMEOUT":
+            exit_price = future.iloc[-1]["close"]
+            outcome = "W" if (
+                (direction == "LONG"  and exit_price > entry) or
+                (direction == "SHORT" and exit_price < entry)
+            ) else "L"
+        else:
+            exit_price = tp if outcome == "W" else sl
+
+        pnl_pct = (
+            (exit_price - entry) / entry * 100 if direction == "LONG"
+            else (entry - exit_price) / entry * 100
+        )
+
+        trades.append({
+            "timestamp":     row["timestamp"],
+            "direction":     direction,
+            "entry":         round(entry, 6),
+            "sl":            round(sl, 6),
+            "tp":            round(tp, 6),
+            "exit_price":    round(exit_price, 6),
+            "outcome":       outcome,
+            "candles_held":  candles_held,
+            "pnl_pct":       round(pnl_pct, 4),
+            "rsi_at_entry":  round(row["rsi"], 2),
+            "adx_at_entry":  round(row["adx"], 2),
+            "di_plus":       round(row["di_plus"], 2),
+            "di_minus":      round(row["di_minus"], 2),
+            "macd":          round(row.get("macd", 0) or 0, 4),
+            "htf_daily":     row.get("htf_trend_daily", "NEUTRAL"),
+            "htf_4h":        row.get("htf_trend_4h", "NEUTRAL"),
+            "htf_1h":        "NEUTRAL",
+        })
+
+        in_trade = True
+        trade_end_idx = idx + candles_held
+
+    return pd.DataFrame(trades)
+
+
 def summarize_backtest(coin_name: str, trades_df: pd.DataFrame) -> dict:
     """Compute summary stats from a backtest trades DataFrame."""
     if trades_df.empty:
@@ -231,7 +341,6 @@ def summarize_backtest(coin_name: str, trades_df: pd.DataFrame) -> dict:
     gross_loss   = abs(losses["pnl_pct"].sum())
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
 
-    # Max drawdown on cumulative PnL series
     cum_pnl = trades_df["pnl_pct"].cumsum()
     rolling_max = cum_pnl.cummax()
     drawdown = cum_pnl - rolling_max
@@ -250,5 +359,112 @@ def summarize_backtest(coin_name: str, trades_df: pd.DataFrame) -> dict:
     }
 
 
+def regime_breakdown(trades_df: pd.DataFrame, df: pd.DataFrame) -> dict:
+    """
+    Labels each trade with its daily regime and ADX bucket.
+
+    Parameters
+    ----------
+    trades_df : trades DataFrame from run_backtest / run_backtest_daily
+    df        : OHLCV + indicators DataFrame used for that backtest
+
+    Returns dict with keys:
+      by_regime : list of {regime, trades, wins, losses, win_rate, profit_factor}
+      by_adx    : list of {bucket, trades, wins, losses, win_rate}
+    """
+    if trades_df.empty:
+        return {"by_regime": [], "by_adx": []}
+
+    # Use htf_daily column in trades if present, else label NEUTRAL
+    def _adx_bucket(adx):
+        if pd.isna(adx):
+            return "ADX 15-20"
+        if adx < 20:
+            return "ADX 15-20"
+        if adx < 25:
+            return "ADX 20-25"
+        if adx < 28:
+            return "ADX 25-28"
+        return "ADX 28+"
+
+    regime_col = "htf_daily"
+    if regime_col not in trades_df.columns:
+        trades_df = trades_df.copy()
+        trades_df[regime_col] = "NEUTRAL"
+
+    # By regime
+    by_regime = []
+    for regime in ["BULLISH", "BEARISH", "NEUTRAL"]:
+        subset = trades_df[trades_df[regime_col] == regime]
+        t = len(subset)
+        if t == 0:
+            continue
+        w = (subset["outcome"] == "W").sum()
+        l = (subset["outcome"] == "L").sum()
+        wr = w / t * 100
+        gp = subset[subset["outcome"] == "W"]["pnl_pct"].sum()
+        gl = abs(subset[subset["outcome"] == "L"]["pnl_pct"].sum())
+        pf = gp / gl if gl > 0 else float("inf")
+        by_regime.append({
+            "regime": regime,
+            "trades": t,
+            "wins": w,
+            "losses": l,
+            "win_rate": round(wr, 1),
+            "profit_factor": round(pf, 2),
+        })
+
+    # By ADX bucket
+    trades_with_adx = trades_df.copy()
+    trades_with_adx["adx_bucket"] = trades_with_adx["adx_at_entry"].apply(_adx_bucket)
+
+    by_adx = []
+    for bucket in ["ADX 15-20", "ADX 20-25", "ADX 25-28", "ADX 28+"]:
+        subset = trades_with_adx[trades_with_adx["adx_bucket"] == bucket]
+        t = len(subset)
+        if t == 0:
+            continue
+        w = (subset["outcome"] == "W").sum()
+        l = (subset["outcome"] == "L").sum()
+        wr = w / t * 100
+        by_adx.append({
+            "bucket": bucket,
+            "trades": t,
+            "wins": w,
+            "losses": l,
+            "win_rate": round(wr, 1),
+        })
+
+    return {"by_regime": by_regime, "by_adx": by_adx}
+
+
+def format_regime_report(coin_name: str, summary: dict,
+                          breakdown: dict, timeframe_label: str):
+    """Print the regime + ADX breakdown report for a coin."""
+    n = summary.get("trades", 0)
+    wr = summary.get("win_rate", 0.0)
+    pf = summary.get("profit_factor", 0.0)
+    dd = summary.get("max_drawdown_pct", 0.0)
+
+    print(f"\n  {coin_name} — {timeframe_label} ({n} simulated trades)")
+    print(f"    Overall WR: {wr:.1f}%  PF: {pf:.2f}  MaxDD: {dd:.1f}%")
+
+    by_regime = breakdown.get("by_regime", [])
+    if by_regime:
+        print(f"\n    By daily regime:")
+        for r in by_regime:
+            flag = "  ⚠ LOW" if r["win_rate"] < 45 else ""
+            print(f"      {r['regime']:<10}  {r['trades']:4d} trades  "
+                  f"WR={r['win_rate']:.1f}%  PF={r['profit_factor']:.2f}{flag}")
+
+    by_adx = breakdown.get("by_adx", [])
+    if by_adx:
+        print(f"\n    By ADX bucket:")
+        for a in by_adx:
+            flag = "  ⚠ LOW" if a["win_rate"] < 45 else ""
+            print(f"      {a['bucket']:<12}  {a['trades']:4d} trades  "
+                  f"WR={a['win_rate']:.1f}%{flag}")
+
+
 if __name__ == "__main__":
-    print("backtest.py — import and call run_backtest(coin_name, df_5min) to use.")
+    print("backtest.py — import and call run_backtest(coin_name, df_4h) to use.")
