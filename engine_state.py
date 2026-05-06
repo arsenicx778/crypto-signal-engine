@@ -2,9 +2,8 @@ import json
 import os
 import tempfile
 
-import pandas as pd
-
 from time_utils import now_pacific_str
+from signal_store import read_latest_signals
 
 STATE_FILE = "engine_state.json"
 COINS = ["ETH", "SOL", "XRP", "LINK"]
@@ -74,59 +73,49 @@ def reconcile_state_with_csv(state: dict, coin_csv_map: dict) -> dict:
     for coin, csv_path in coin_csv_map.items():
         if not os.path.exists(csv_path):
             continue
-        try:
-            df = pd.read_csv(csv_path)
-        except Exception:
-            continue
 
-        coin_state = state.setdefault(
-            "coins", {}
-        )
+        coin_state = state.setdefault("coins", {})
         if coin not in coin_state:
             coin_state[coin] = _default_coin_state()
         cs = coin_state[coin]
 
+        # Use read_latest_signals so deduplication is applied — same view as the gate/monitor
+        try:
+            rows = read_latest_signals(csv_path)
+        except Exception:
+            continue
+
         # Recalculate capital from completed trades
         capital = DEFAULT_CAPITAL
         completed = []
-        try:
-            for _, row in df.iterrows():
-                try:
-                    outcome = str(row.get("outcome", "")).strip()
-                    risk = float(row.get("risk_amount", 0) or 0)
-                    reward = float(row.get("reward_amount", 0) or 0)
-                except (ValueError, TypeError):
-                    continue
-                if outcome == "W":
-                    capital += reward
-                    completed.append("W")
-                elif outcome == "L":
-                    capital -= risk
-                    completed.append("L")
-        except Exception:
-            pass
+        for row in rows:
+            outcome = str(row.get("outcome", "")).strip()
+            try:
+                risk   = float(row.get("risk_amount",   0) or 0)
+                reward = float(row.get("reward_amount", 0) or 0)
+            except (ValueError, TypeError):
+                continue
+            if outcome == "W":
+                capital += reward
+                completed.append("W")
+            elif outcome == "L":
+                capital -= risk
+                completed.append("L")
 
         cs["capital"] = max(0.0, capital)
 
-        # Count open trades by direction
-        open_longs = 0
-        open_shorts = 0
-        try:
-            for _, row in df.iterrows():
-                try:
-                    outcome = str(row.get("outcome", "")).strip()
-                    direction = str(row.get("direction", "")).strip().upper()
-                except (ValueError, TypeError):
-                    continue
-                if outcome == "pending":
-                    if direction == "LONG":
-                        open_longs += 1
-                    elif direction == "SHORT":
-                        open_shorts += 1
-        except Exception:
-            pass
+        # Count open trades by direction using deduplicated rows
+        open_longs = open_shorts = 0
+        for row in rows:
+            outcome   = str(row.get("outcome",   "")).strip()
+            direction = str(row.get("direction", "")).strip().upper()
+            if outcome == "pending":
+                if direction == "LONG":
+                    open_longs += 1
+                elif direction == "SHORT":
+                    open_shorts += 1
 
-        cs["open_longs"] = open_longs
+        cs["open_longs"]  = open_longs
         cs["open_shorts"] = open_shorts
 
         # Consecutive losses from tail of completed trades

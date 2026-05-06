@@ -1,11 +1,10 @@
 import threading
 from datetime import date
 from signal_store import read_latest_signals
+from config import RISK_PERCENT, REWARD_PERCENT
 
 MAX_DAILY_CALLS  = 8000
 CAPITAL          = 1000.0   # per-coin starting capital
-RISK_PERCENT     = 0.02     # 2% of coin capital per trade
-REWARD_PERCENT   = 0.03     # 3% of coin capital per win (1.5:1)
 
 COIN_CSV = {
     "ETH":  "eth_signals.csv",

@@ -13,3 +13,12 @@ pgrep -f "python main.py" | wc -l
 
 
 pgrep -f "python main.py" | wc -l
+
+
+github push
+
+git status
+git add .
+git commit . -m "   "
+git push
+ 

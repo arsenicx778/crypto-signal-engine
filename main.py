@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import sys
 import signal as signal_module
 import threading
@@ -17,7 +19,7 @@ from step8_history import load_history, summarize_history
 from step9_gate import pre_signal_gate, is_fully_blocked
 from step10_brain import generate_signal, apply_atr_stops
 from step11_guardrails import apply_guardrails
-from step12_output import save_signal, monitor_price, resume_open_trade_monitor
+from step12_output import save_signal, monitor_price, resume_open_trade_monitor, start_reconcile_loop
 from step_tp_adjust import run_tp_adjustment
 from time_utils import now_pacific_str
 
@@ -56,6 +58,11 @@ def run_cycle(coin):
 
     if not LIVE_TRADING_ENABLED:
         print(f"[CYCLE:{coin_name}] PAUSED — {LIVE_TRADING_PAUSE_REASON}")
+        return
+
+    from config import SUSPENDED_COINS
+    if coin_name in SUSPENDED_COINS:
+        print(f"[CYCLE:{coin_name}] SUSPENDED — skipping signal generation")
         return
 
     print(f"\n[{now_pacific_str()}] [{coin_name}] Starting cycle...")
@@ -150,7 +157,7 @@ def run_cycle(coin):
         return  # One coin failure does not stop other coins
 
     # STEP 10b — Override SL/TP with ATR-based sizing
-    signal_result = apply_atr_stops(signal_result, filtered["data"])
+    signal_result = apply_atr_stops(signal_result, filtered["data"], coin_name=coin_name)
 
     _brain_sig  = signal_result["data"].get("signal", "?")
     _brain_conf = signal_result["data"].get("confidence", 0)
@@ -278,7 +285,8 @@ def run_all_cycles():
 if __name__ == "__main__":
     print("Starting AI Crypto Day Trading Signal Engine...")
     print("Coins: ETH | SOL | LINK | XRP")
-    print("Strategy: small frequent wins | 2% risk per trade | 1.5:1 reward:risk")
+    from config import RISK_PERCENT, REWARD_RISK_RATIO
+    print(f"Strategy: small frequent wins | {RISK_PERCENT*100:.1f}% risk per trade | {REWARD_RISK_RATIO}:1 reward:risk")
     print("─" * 55)
 
     # Load and reconcile engine state
@@ -307,6 +315,12 @@ if __name__ == "__main__":
             symbol=coin["symbol"],
             coin_name=coin["name"],
         )
+
+    # Start reconcile loop — catches any position that missed a monitor thread
+    start_reconcile_loop([
+        {"name": coin["name"], "symbol": coin["symbol"], "signals_file": COIN_CSV[coin["name"]]}
+        for coin in COINS
+    ])
 
     run_all_cycles()
 

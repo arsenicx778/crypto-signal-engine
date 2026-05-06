@@ -1156,52 +1156,140 @@ function replayCapital(tradeable, capitalStart){
   return capital;
 }
 
-function buildSummaryCoinStats(windowSignals){
-  // Capital, W/L record, win rate, and open positions come ONLY from the server-computed
-  // coinStats (all-time replay from the full CSV). The date window NEVER truncates these
-  // permanent metrics. Window signals are used only to compute the window-scoped P&L delta.
-  const baseByCoin = new Map((coinStats || []).map(c=>[c.coin, c]));
+// ── Centralized filter + metric pipeline ─────────────────────────────────────
+
+/**
+ * Return only signals that fall within {from, to} based on their timestamp.
+ * open (pending) trades are always included regardless of window —
+ * they have no close_time yet so they're always "active".
+ */
+function getFilteredSignals(rawSignals, { from, to, coin } = {}) {
+  let sigs = rawSignals;
+  if (coin && coin !== 'all') sigs = sigs.filter(s => s.coin === coin);
+  if (!from && !to) return sigs;
+  return sigs.filter(s => {
+    // Always keep pending/open trades regardless of timestamp window
+    if ((s.signal === 'Buy' || s.signal === 'Sell') && normalizeOutcome(s.outcome) === 'pending') return true;
+    const d = parseSignalDate(s.timestamp);
+    if (!d) return false;
+    if (from && d < from) return false;
+    if (to   && d > to)   return false;
+    return true;
+  });
+}
+
+/** Normalize outcome strings to canonical 'W' | 'L' | 'pending' | '' */
+function normalizeOutcome(v) {
+  if (v == null) return '';
+  const s = String(v).trim().toUpperCase();
+  if (s === 'W' || s === 'WIN' || s === 'TP' || s === 'TAKE_PROFIT') return 'W';
+  if (s === 'L' || s === 'LOSS' || s === 'LOSE' || s === 'SL' || s === 'STOP_LOSS') return 'L';
+  if (s === 'PENDING' || s === 'OPEN' || s === '') return 'pending';
+  return s;
+}
+
+/** Pure: given an already-filtered signal array, compute all trade metrics */
+function calculateTradeMetrics(sigs, capitalStart = 1000) {
+  const tradeable = sigs.filter(s => s.signal === 'Buy' || s.signal === 'Sell');
+  const wins      = tradeable.filter(s => normalizeOutcome(s.outcome) === 'W');
+  const losses    = tradeable.filter(s => normalizeOutcome(s.outcome) === 'L');
+  const pending   = tradeable.filter(s => normalizeOutcome(s.outcome) === 'pending');
+  const completed = wins.length + losses.length;
+  const win_rate  = completed > 0 ? +(wins.length / completed * 100).toFixed(1) : null;
+
+  // Replay capital through closed trades in chronological order
+  let capital = capitalStart;
+  sortClosedTrades([...wins, ...losses]).forEach(s => {
+    const out = normalizeOutcome(s.outcome);
+    if (out === 'W') capital += s.reward_amount ? parseFloat(s.reward_amount) : capital * 0.03;
+    else if (out === 'L') capital -= s.risk_amount  ? parseFloat(s.risk_amount)  : capital * 0.02;
+  });
+
+  // Loss streak: walk backwards through ALL tradeable, not just closed
+  let loss_streak = 0;
+  for (const s of [...tradeable].reverse()) {
+    const out = normalizeOutcome(s.outcome);
+    if (out === 'L') loss_streak++;
+    else if (out === 'W') break;
+  }
+
+  const skipped = sigs.filter(s => s.signal === 'Do Not Enter').length;
+  const longs_open  = pending.filter(s => s.signal === 'Buy').length;
+  const shorts_open = pending.filter(s => s.signal === 'Sell').length;
+
+  return {
+    wins:         wins.length,
+    losses:       losses.length,
+    completed,
+    win_rate,       // null when no closed trades
+    pending:      pending.length,
+    longs_open,
+    shorts_open,
+    open_trades:  pending,
+    capital:      Math.round(capital * 100) / 100,
+    pnl:          Math.round((capital - capitalStart) * 100) / 100,
+    loss_streak,
+    skipped,
+    total_signals: sigs.length,
+  };
+}
+
+/**
+ * Build per-coin metric objects for the coin row cards.
+ * Each coin gets metrics derived from windowSignals (already date-filtered).
+ * When meta.isAllTime, we blend in server all-time capital as the primary
+ * capital figure (since window === full history anyway).
+ */
+function buildCoinViewModels(windowSignals, meta) {
   const coins = coinStats.length
-    ? coinStats.map(c=>c.coin)
-    : [...new Set(signals.map(s=>s.coin).filter(Boolean))].sort();
-  return coins.map(coin=>{
-    const base = baseByCoin.get(coin) || {coin};
+    ? coinStats.map(c => c.coin)
+    : [...new Set(signals.map(s => s.coin).filter(Boolean))].sort();
 
-    // All-time values from server (never windowed)
-    const atCapital    = base.capital    != null ? base.capital    : 1000;
-    const atWins       = base.wins       != null ? base.wins       : 0;
-    const atLosses     = base.losses     != null ? base.losses     : 0;
-    const atCompleted  = base.completed  != null ? base.completed  : (atWins + atLosses);
-    const atWinRate    = base.win_rate   != null ? base.win_rate   : (atCompleted > 0 ? +(atWins / atCompleted * 100).toFixed(1) : 0);
-    const atPending    = base.pending    != null ? base.pending    : 0;
-    const atLongsOpen  = base.longs_open != null ? base.longs_open : 0;
-    const atShortsOpen = base.shorts_open!= null ? base.shorts_open: 0;
-    const atOpenTrades = base.open_trades || [];
+  const serverByCoin = new Map((coinStats || []).map(c => [c.coin, c]));
 
-    // Window-scoped P&L (only used when date filter is not all-time)
-    const windowRows      = windowSignals.filter(s=>s.coin===coin);
-    const windowTradeable = windowRows.filter(s=>s.signal==='Buy'||s.signal==='Sell');
-    const windowPnl       = replayCapital(windowTradeable, 1000) - 1000;
+  return coins.map(coin => {
+    const server = serverByCoin.get(coin) || {};
+    const coinSigs = windowSignals.filter(s => s.coin === coin);
+    const m = calculateTradeMetrics(coinSigs, 1000);
+
+    // For "All time", prefer server-replayed capital (authoritative) but use
+    // client-computed W/L/win_rate from the same dataset (should match).
+    const capital      = meta.isAllTime && server.capital != null ? server.capital : (1000 + m.pnl);
+    const wins         = meta.isAllTime && server.wins    != null ? server.wins    : m.wins;
+    const losses       = meta.isAllTime && server.losses  != null ? server.losses  : m.losses;
+    const completed    = wins + losses;
+    const win_rate     = completed > 0 ? +(wins / completed * 100).toFixed(1) : null;
+    const pending      = meta.isAllTime && server.pending != null ? server.pending : m.pending;
+    const longs_open   = meta.isAllTime && server.longs_open  != null ? server.longs_open  : m.longs_open;
+    const shorts_open  = meta.isAllTime && server.shorts_open != null ? server.shorts_open : m.shorts_open;
+    const open_trades  = meta.isAllTime ? (server.open_trades || []) : m.open_trades;
+    const displayPnl   = meta.isAllTime ? (capital - 1000) : m.pnl;
 
     return {
-      ...base,
       coin,
-      // Permanent all-time metrics — always from server
-      capital:      atCapital,
-      wins:         atWins,
-      losses:       atLosses,
-      completed:    atCompleted,
-      win_rate:     atWinRate,
-      pending:      atPending,
-      longs_open:   atLongsOpen,
-      shorts_open:  atShortsOpen,
-      open_trades:  atOpenTrades,
-      pnl:          atCapital - 1000,
-      // Window-scoped delta (for windowed display mode)
-      window_pnl:   windowPnl,
-      signals_total: windowRows.length,
+      current_price:   server.current_price,
+      risk_per_trade:  server.risk_per_trade,
+      reward_per_trade: server.reward_per_trade,
+      capital,
+      wins,
+      losses,
+      completed,
+      win_rate,
+      pending,
+      longs_open,
+      shorts_open,
+      open_trades,
+      pnl:             capital - 1000,
+      window_pnl:      m.pnl,
+      display_pnl:     displayPnl,
+      signals_total:   coinSigs.length,
     };
   });
+}
+
+function buildSummaryCoinStats(windowSignals){
+  const meta = getWindowMeta();
+  return buildCoinViewModels(windowSignals, meta);
 }
 
 function renderLiveSummaries(){
@@ -1427,7 +1515,7 @@ function renderMetrics(cs, sigs, meta){
       <div class="met-label">Win Rate</div>
       <div class="met-val" style="color:${wrCol}">${(atWins+atLosses)>0?fmtNum(atWR,1)+'%':'—'}</div>
       <div class="met-sub">${atWins}w ${atLosses}l</div>
-      <div class="met-hint">All-time win rate from full CSV history.</div>
+      <div class="met-hint">${meta.isAllTime ? 'All-time win rate from full CSV history.' : `Win rate within ${meta.label}.`}</div>
     </div>
     <div class="met-card">
       <div class="met-label">Open Trades</div>
@@ -1452,9 +1540,9 @@ function renderCoinRow(cs, meta){
     // All-time P&L always from server capital replay
     const pnl         = c.capital - 1000;
     // Window-scoped P&L for windowed display mode
-    const displayPnl  = meta.isAllTime ? pnl : (c.window_pnl || 0);
+    const displayPnl  = c.display_pnl !== undefined ? c.display_pnl : (meta.isAllTime ? pnl : (c.window_pnl || 0));
     const capCol      = pnl > 0 ? '#00c805' : pnl < 0 ? '#ff3b30' : '#8e8e93';
-    const wrCol       = c.completed===0?'#8e8e93':c.win_rate>=55?'#00c805':c.win_rate>=45?'#ff9f0a':'#ff3b30';
+    const wrCol       = c.win_rate==null?'#8e8e93':c.win_rate>=55?'#00c805':c.win_rate>=45?'#ff9f0a':'#ff3b30';
     const priceStr    = c.current_price ? fmtUSD(c.current_price, c.current_price < 10 ? 4 : 2) : '—';
     const riskStr     = c.risk_per_trade   ? fmtUSD(c.risk_per_trade,   2) : fmtUSD(c.capital*0.02, 2);
     const rewStr      = c.reward_per_trade ? fmtUSD(c.reward_per_trade, 2) : fmtUSD(c.capital*0.03, 2);
@@ -1482,7 +1570,7 @@ function renderCoinRow(cs, meta){
       <div style="display:flex;justify-content:space-between;margin-bottom:4px">
         <div>
           <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Win Rate</div>
-          <div style="font-size:12px;font-family:var(--mono);color:${wrCol}">${c.completed>0?c.win_rate+'%':'—'}</div>
+          <div style="font-size:12px;font-family:var(--mono);color:${wrCol}">${c.win_rate!=null?fmtNum(c.win_rate,1)+'%':'—'}</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Open</div>
@@ -1528,40 +1616,58 @@ async function refreshMarketView(){
   }
 }
 
-function computeStatsJS(sigs){
-  // Use all-time server values for any metric that must not be affected by the date filter.
-  // The date-filtered sigs are used only for window-scoped loss streak computation.
-  const atWins     = (coinStats||[]).reduce((a,c)=>a+(c.wins||0),0);
-  const atLosses   = (coinStats||[]).reduce((a,c)=>a+(c.losses||0),0);
-  const atPending  = (coinStats||[]).reduce((a,c)=>a+(c.pending||0),0);
-  const atCompleted= atWins + atLosses;
-  const atCapital  = (coinStats||[]).reduce((a,c)=>a+(c.capital||1000),0);
-
-  // Loss streak from the full (unfiltered) signals list
-  const allTradeable = signals.filter(s=>s.signal==='Buy'||s.signal==='Sell');
-  let loss_streak=0;
-  for(const b of [...allTradeable].reverse()){
-    if(b.outcome==='L') loss_streak++;
-    else if(b.outcome==='W') break;
+function computeStatsJS(sigs) {
+  const meta = getWindowMeta();
+  // For all-time, blend server totals for capital accuracy
+  if (meta.isAllTime) {
+    const filteredCoinStats = coinFilter === 'all'
+      ? (coinStats || [])
+      : (coinStats || []).filter(c => c.coin === coinFilter);
+    const atWins     = filteredCoinStats.reduce((a, c) => a + (c.wins    || 0), 0);
+    const atLosses   = filteredCoinStats.reduce((a, c) => a + (c.losses  || 0), 0);
+    const atPending  = filteredCoinStats.reduce((a, c) => a + (c.pending || 0), 0);
+    const atCompleted = atWins + atLosses;
+    const atCapital  = filteredCoinStats.reduce((a, c) => a + (c.capital || 1000), 0);
+    // Loss streak still computed from live signals
+    const allTradeable = sigs.filter(s => s.signal === 'Buy' || s.signal === 'Sell');
+    let loss_streak = 0;
+    for (const b of [...allTradeable].reverse()) {
+      const out = normalizeOutcome(b.outcome);
+      if (out === 'L') loss_streak++;
+      else if (out === 'W') break;
+    }
+    const pendingList = coinFilter === 'all'
+      ? openTrades
+      : openTrades.filter(t => t.coin === coinFilter);
+    return {
+      capital:        atCapital,
+      win_rate:       atCompleted > 0 ? atWins / atCompleted * 100 : null,
+      wins:           atWins,
+      losses:         atLosses,
+      pending_trades: atPending,
+      pending_buys:   atPending,
+      total_signals:  sigs.length,
+      total_completed: atCompleted,
+      loss_streak,
+      open_trades:    pendingList,
+      open_trade:     pendingList[pendingList.length - 1] || null,
+    };
   }
 
-  // Open trades list from server (via openTrades global, filtered by coin if needed)
-  const pendingList = coinFilter==='all'
-    ? openTrades
-    : openTrades.filter(t=>t.coin===coinFilter);
-
+  // Windowed: derive everything from the filtered signals
+  const m = calculateTradeMetrics(sigs, 1000 * (coinFilter === 'all' ? 4 : 1));
   return {
-    capital:        atCapital,
-    win_rate:       atCompleted>0?(atWins/atCompleted*100):0,
-    wins:           atWins,
-    losses:         atLosses,
-    pending_trades: atPending,
-    pending_buys:   atPending,
+    capital:        m.capital,
+    win_rate:       m.win_rate,
+    wins:           m.wins,
+    losses:         m.losses,
+    pending_trades: m.pending,
+    pending_buys:   m.pending,
     total_signals:  sigs.length,
-    total_completed:atCompleted,
-    loss_streak,
-    open_trades:    pendingList,
-    open_trade:     pendingList[pendingList.length-1]||null,
+    total_completed: m.completed,
+    loss_streak:    m.loss_streak,
+    open_trades:    m.open_trades,
+    open_trade:     m.open_trades[m.open_trades.length - 1] || null,
   };
 }
 
@@ -1572,10 +1678,11 @@ function renderAlerts(st){
   const a=[];
   if(st.loss_streak>=3)
     a.push(`<div class="alert alert-danger">&#9888;&#65039; ${st.loss_streak} consecutive losses — consider pausing</div>`);
-  if(st.total_completed>=10&&st.win_rate<45)
-    a.push(`<div class="alert alert-danger">Win rate ${fmtNum(st.win_rate,1)}% is below 45% — strategy needs review</div>`);
-  else if(st.total_completed>=10&&st.win_rate<55)
-    a.push(`<div class="alert alert-warn">Win rate ${fmtNum(st.win_rate,1)}% is in the caution zone (45–55%)</div>`);
+  const wr = st.win_rate;
+  if(wr !== null && st.total_completed>=10 && wr<45)
+    a.push(`<div class="alert alert-danger">Win rate ${fmtNum(wr,1)}% is below 45% — strategy needs review</div>`);
+  else if(wr !== null && st.total_completed>=10 && wr<55)
+    a.push(`<div class="alert alert-warn">Win rate ${fmtNum(wr,1)}% is in the caution zone (45–55%)</div>`);
   if((st.pending_trades||0)>1)
     a.push(`<div class="alert alert-warn">${st.pending_trades} open trade positions — review concurrency and gate behavior</div>`);
   w.innerHTML=a.join('');

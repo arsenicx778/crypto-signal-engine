@@ -29,6 +29,8 @@ def compute_indicators(df):
         indicators["di_minus"]    = round(adx_obj.adx_neg().iloc[-1], 4)
         indicators["obv"]         = round(ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume().iloc[-1], 4)
         indicators["close"]       = round(close.iloc[-1], 4)
+        prev = close.iloc[-2] if len(close) >= 2 else close.iloc[-1]
+        indicators["prev_close"]  = round(prev, 4)
         return {"success": True, "data": indicators}
     except Exception as e:
         return {"success": False, "error": str(e), "data": None}

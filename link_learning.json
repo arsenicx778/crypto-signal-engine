@@ -1,36 +1,13 @@
 {
   "coin": "LINK",
-  "generated_at": "2026-05-02 06:26 UTC",
+  "generated_at": "2026-05-04 08:10 UTC",
   "source": "historical_bootstrap",
   "candles_analyzed": 721,
-  "trade_count": 66,
-  "overall_win_rate": 47,
-  "patterns": [
-    {
-      "condition": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
-      "wins": 4,
-      "losses": 10,
-      "win_rate": 28,
-      "recommendation": "Avoid this setup \u2014 29% historical win rate, negative edge.",
-      "confidence": "low",
-      "confidence_level": "LOW_CONFIDENCE",
-      "sample_size_note": "14 historical occurrences [LOW_CONFIDENCE]"
-    }
-  ],
-  "weighted_patterns": [
-    {
-      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
-      "weighted_wins": 4.0,
-      "weighted_losses": 10.0,
-      "raw_count": 14,
-      "weighted_win_rate": 0.2857,
-      "win_rate_pct": 28.6,
-      "confidence_penalty": 12.5,
-      "penalty_tag": "STRONG_AVOID",
-      "confidence_level": "LOW_CONFIDENCE"
-    }
-  ],
-  "strongest_long_setup": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos (29% WR)",
+  "trade_count": 37,
+  "overall_win_rate": 46,
+  "patterns": [],
+  "weighted_patterns": [],
+  "strongest_long_setup": "No qualifying LONG pattern found.",
   "strongest_short_setup": "No qualifying SHORT pattern found.",
-  "summary": "Bootstrap from 721 historical candles. 66 simulated trades, 47% win rate. 0 pattern keys with 20+ occurrences (HIGH confidence), 1 with 10-19 (LOW_CONFIDENCE). Use these as starting priors; live trading will refine them."
+  "summary": "Bootstrap from 721 historical candles. 37 simulated trades, 46% win rate. 0 pattern keys with 20+ occurrences (HIGH confidence), 0 with 10-19 (LOW_CONFIDENCE). Use these as starting priors; live trading will refine them."
 }

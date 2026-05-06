@@ -1,78 +1,13 @@
 {
   "coin": "XRP",
-  "generated_at": "2026-05-02 06:26 UTC",
+  "generated_at": "2026-05-04 08:10 UTC",
   "source": "historical_bootstrap",
   "candles_analyzed": 721,
-  "trade_count": 68,
-  "overall_win_rate": 50,
-  "patterns": [
-    {
-      "condition": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
-      "wins": 2,
-      "losses": 8,
-      "win_rate": 20,
-      "recommendation": "Avoid this setup \u2014 20% historical win rate, negative edge.",
-      "confidence": "low",
-      "confidence_level": "LOW_CONFIDENCE",
-      "sample_size_note": "10 historical occurrences [LOW_CONFIDENCE]"
-    },
-    {
-      "condition": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg",
-      "wins": 6,
-      "losses": 5,
-      "win_rate": 54,
-      "recommendation": "Proceed with caution \u2014 54% historical win rate, borderline edge.",
-      "confidence": "low",
-      "confidence_level": "LOW_CONFIDENCE",
-      "sample_size_note": "11 historical occurrences [LOW_CONFIDENCE]"
-    },
-    {
-      "condition": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg",
-      "wins": 6,
-      "losses": 4,
-      "win_rate": 60,
-      "recommendation": "Favor this setup \u2014 60% historical win rate over 10 trades.",
-      "confidence": "low",
-      "confidence_level": "LOW_CONFIDENCE",
-      "sample_size_note": "10 historical occurrences [LOW_CONFIDENCE]"
-    }
-  ],
-  "weighted_patterns": [
-    {
-      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
-      "weighted_wins": 2.0,
-      "weighted_losses": 8.0,
-      "raw_count": 10,
-      "weighted_win_rate": 0.2,
-      "win_rate_pct": 20.0,
-      "confidence_penalty": 12.5,
-      "penalty_tag": "STRONG_AVOID",
-      "confidence_level": "LOW_CONFIDENCE"
-    },
-    {
-      "key": "SHORT|rsi_low|gap_weak|adx_weak|macd_neg",
-      "weighted_wins": 6.0,
-      "weighted_losses": 5.0,
-      "raw_count": 11,
-      "weighted_win_rate": 0.5455,
-      "win_rate_pct": 54.5,
-      "confidence_penalty": 2.5,
-      "penalty_tag": "CAUTION",
-      "confidence_level": "LOW_CONFIDENCE"
-    },
-    {
-      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg",
-      "weighted_wins": 6.0,
-      "weighted_losses": 4.0,
-      "raw_count": 10,
-      "weighted_win_rate": 0.6,
-      "win_rate_pct": 60.0,
-      "confidence_penalty": 0.0,
-      "penalty_tag": "NEUTRAL",
-      "confidence_level": "LOW_CONFIDENCE"
-    }
-  ],
-  "strongest_long_setup": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos (20% WR)",
-  "strongest_short_setup": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg (60% WR)",
-  "summary": "Bootstrap from 721 historical candles. 68 simulated trades, 50% win rate. 0 pattern keys with 20+ occurrences (HIGH confidence), 3 with 10-19 (LOW_CONFIDENCE). Use these as starting priors; live trading will refine them."
+  "trade_count": 34,
+  "overall_win_rate": 44,
+  "patterns": [],
+  "weighted_patterns": [],
+  "strongest_long_setup": "No qualifying LONG pattern found.",
+  "strongest_short_setup": "No qualifying SHORT pattern found.",
+  "summary": "Bootstrap from 721 historical candles. 34 simulated trades, 44% win rate. 0 pattern keys with 20+ occurrences (HIGH confidence), 0 with 10-19 (LOW_CONFIDENCE). Use these as starting priors; live trading will refine them."
 }

@@ -220,6 +220,59 @@ def resume_open_trade_monitor(signals_file=None, symbol="XETHZUSD", coin_name="E
                       direction=direction)
 
 
+def reconcile_open_positions(signals_file=None, symbol="XETHZUSD", coin_name="ETH"):
+    """Scan CSV for pending positions with no active monitor thread and start one.
+
+    Called on a 5-minute interval so any position opened after a crash/restart
+    or missed by the initial resume sweep gets picked up automatically.
+    """
+    rows = read_latest_signals(signals_file)
+    open_trades = [
+        row for row in rows
+        if row.get("signal") in ("Buy", "Sell") and row.get("outcome", "pending") == "pending"
+    ]
+    for trade in open_trades:
+        monitor_key = f"{coin_name}:{trade['timestamp']}"
+        if monitor_key not in ACTIVE_MONITORS:
+            sig = trade.get("signal")
+            direction = "SHORT" if sig == "Sell" else "LONG"
+            print(f"[MONITOR:{coin_name}] reconcile — found unmonitored {direction} from "
+                  f"{trade['timestamp']} — starting monitor thread")
+            monitor_price(trade["timestamp"], symbol=symbol,
+                          signals_file=signals_file, coin_name=coin_name,
+                          direction=direction)
+
+
+# Per-coin reconcile config: symbol and signals file, populated by start_reconcile_loop()
+_RECONCILE_COINS: list[dict] = []
+
+
+def start_reconcile_loop(coins: list[dict]):
+    """Start a background thread that calls reconcile_open_positions every 5 minutes.
+
+    coins: list of dicts with keys 'name', 'symbol', 'signals_file'
+    Call once at engine startup after resume_open_trade_monitor.
+    """
+    global _RECONCILE_COINS
+    _RECONCILE_COINS = coins
+
+    def _loop():
+        while True:
+            time.sleep(300)  # 5 minutes
+            for coin in _RECONCILE_COINS:
+                try:
+                    reconcile_open_positions(
+                        signals_file=coin["signals_file"],
+                        symbol=coin["symbol"],
+                        coin_name=coin["name"],
+                    )
+                except Exception as e:
+                    print(f"[MONITOR:{coin['name']}] reconcile error: {e}")
+
+    threading.Thread(target=_loop, daemon=True, name="reconcile-loop").start()
+    print(f"[MONITOR] Reconcile loop started — scanning every 5 minutes for unmonitored positions")
+
+
 def _update_outcome(timestamp, outcome, close_price, signals_file=None, coin_name="ETH"):
     rows = read_latest_signals(signals_file)
     for row in reversed(rows):

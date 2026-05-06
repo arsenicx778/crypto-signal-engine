@@ -4,7 +4,7 @@ import re
 import anthropic
 from dotenv import load_dotenv
 from step_learn import format_learning_for_brain
-from config import ENABLE_SHORTS
+from config import ENABLE_SHORTS, PER_COIN_LIVE_CONFIG, ATR_MULTIPLIER_STOP, ATR_MULTIPLIER_TP
 
 load_dotenv()
 client = anthropic.Anthropic()
@@ -208,38 +208,39 @@ def generate_signal(filtered_indicators, sentiment, history_summary, capital, ri
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=800,
-            system=f"""You are analyzing {coin_name} ({coin_symbol}) for a day trading signal. Adjust your analysis for this specific asset. XRP prices are in cents range. ETH SOL LINK prices are in dollars range.
+            system=f"""You are analyzing {coin_name} ({coin_symbol}) for a scalping signal. Adjust your analysis for this specific asset. XRP prices are in cents range. ETH SOL LINK prices are in dollars range.
 
-You are an aggressive {coin_name} DAY TRADING signal engine.
+You are a {coin_name} SCALPING signal engine.
 
 STRATEGY:
-- Target small frequent wins that accumulate into consistent daily profit
-- Each trade targets 0.5% to 2% price moves - capture momentum moves decisively
-- Tight stop losses to protect capital - risk only what is specified
-- Risk per trade is 2% of current coin capital. Reward target is 3% of current coin capital (1.5:1 reward:risk)
-- Position size is calculated as: risk_amount / SL_distance - this determines how many units to buy/sell
-- Be aggressive on confluence signals - do not wait for perfection
-- 60% confidence is acceptable for entry when indicators align clearly
+- This is a scalping strategy targeting 0.3 to 0.8 percent moves.
+- Trades should resolve within 30 to 90 minutes based on tight ATR-based stops and targets.
+- Only enter when momentum is clearly established in the current candle sequence.
+- Prefer entries where MACD histogram is accelerating.
+- Prefer entries where DI gap is widening.
+- Do not enter when indicators are mixed or when the last candle shows reversal.
+- Be conservative with confidence scores. The 62 to 68 percent range is appropriate for most valid setups.
+- Only go above 70 percent when all indicators strongly align.
+- Risk per trade is 1.5% of current coin capital. Reward target is 1.8% of current coin capital (1.2:1 reward:risk).
+- Position size is calculated as: risk_amount / SL_distance.
 
 RULES:
 - {outputs_line} possible outputs: Buy (long){sell_in_outputs} or Do Not Enter
-- If confidence is below 60% output Do Not Enter regardless of other factors
-- Stop loss and take profit MUST reflect day trading targets (0.5-2% moves)
-- Take profit must always be at least 1.5x the stop loss distance
-- Stop loss must never exceed the risk amount provided
+- If confidence is below 62% output Do Not Enter regardless of other factors
+- Stop loss and take profit MUST reflect scalping targets (0.3-0.8% moves)
+- Take profit must be at least 1.2x the stop loss distance
 - Cite specific indicator values in your reasoning
-- Never hedge - commit to a clear decision
-- Think like a day trader: small wins compound into big gains
-- When RSI is below 35 (oversold), only enter Buy if sentiment score is above +0.4. Oversold RSI without sentiment confirmation is a falling knife not a bounce setup.
+- Never hedge — commit to a clear decision
+- When RSI is below 35 (oversold), only enter Buy if sentiment score is above +0.4
 - DI+ above DI- confirms uptrend. DI- above DI+ confirms downtrend. Never enter a Buy signal when DI- is greater than DI+ regardless of what other indicators show.
 
 INDICATOR GUIDANCE:
-- ADX measures trend STRENGTH only - it is non-directional. Do NOT use ADX alone as bullish confirmation.
-- Use DI+ vs DI- for directional bias when ADX is selected; DI+ > DI- = bullish trend, DI- > DI+ = bearish
-- BB_WIDTH measures Bollinger Band squeeze/expansion: BB_WIDTH > 0.02 indicates meaningful price movement is occurring
+- ADX measures trend STRENGTH only — it is non-directional. Do NOT use ADX alone as bullish confirmation.
+- Use DI+ vs DI- for directional bias; DI+ > DI- = bullish trend, DI- > DI+ = bearish
+- BB_WIDTH measures Bollinger Band squeeze/expansion: BB_WIDTH > 0.02 indicates meaningful price movement
 - BB_WIDTH expanding = volatility increasing, good for momentum entries
-- BB_WIDTH < 0.015 = squeeze / low volatility = avoid or wait for breakout
-- Prefer BB_WIDTH over ADX for trend confirmation when trend direction is unclear
+- BB_WIDTH < 0.003 = squeeze / low volatility = avoid
+- MACD histogram acceleration (increasing absolute value) is a stronger signal than MACD level alone
 
 PRICE SCALE FOR {coin_name}:
 {coin_price_note}
@@ -341,13 +342,11 @@ Generate day trading signal now."""
         }
 
 
-ATR_STOP_MULTIPLIER = 1.5
-
-
-def apply_atr_stops(signal_result, filtered_indicators):
+def apply_atr_stops(signal_result, filtered_indicators, coin_name="ETH"):
     """
     Override brain-generated SL/TP with ATR-based sizing after a Buy or Sell signal.
-    Falls back to the brain's values if ATR is unavailable.
+    Uses per-coin ATR_SL_MULTIPLIER and ATR_TP_MULTIPLIER from PER_COIN_LIVE_CONFIG,
+    falling back to global ATR_MULTIPLIER_STOP / ATR_MULTIPLIER_TP.
     filtered_indicators is the dict from step6 (keys like 'atr', 'ATR', etc.).
     """
     signal = signal_result.get("data", {})
@@ -365,7 +364,7 @@ def apply_atr_stops(signal_result, filtered_indicators):
             break
 
     if not atr:
-        print(f"[ATR_STOPS] fallback - ATR not found in indicators, using brain SL/TP")
+        print(f"[ATR_STOPS:{coin_name}] fallback — ATR not found in indicators, using brain SL/TP")
         return signal_result
 
     entry = signal.get("entry_price")
@@ -376,8 +375,13 @@ def apply_atr_stops(signal_result, filtered_indicators):
     except (TypeError, ValueError):
         return signal_result
 
-    stop_distance = round(atr * ATR_STOP_MULTIPLIER, 4)
-    tp_distance   = round(stop_distance * 1.5, 4)
+    # Per-coin multipliers, fall back to global defaults
+    coin_cfg    = PER_COIN_LIVE_CONFIG.get(coin_name, {})
+    sl_mult     = coin_cfg.get("ATR_SL_MULTIPLIER", ATR_MULTIPLIER_STOP)
+    tp_mult     = coin_cfg.get("ATR_TP_MULTIPLIER", ATR_MULTIPLIER_TP)
+
+    stop_distance = round(atr * sl_mult, 4)
+    tp_distance   = round(atr * tp_mult, 4)
 
     is_long = signal["signal"] == "Buy"
     if is_long:
@@ -387,7 +391,9 @@ def apply_atr_stops(signal_result, filtered_indicators):
         signal["stop_loss"]   = round(entry + stop_distance, 4)
         signal["take_profit"] = round(entry - tp_distance, 4)
 
-    print(f"[ATR_STOPS] ATR={atr} stop_dist={stop_distance} SL={signal['stop_loss']} TP={signal['take_profit']}")
+    print(f"[ATR_STOPS:{coin_name}] ATR={atr} sl_mult={sl_mult} tp_mult={tp_mult} "
+          f"stop_dist={stop_distance} tp_dist={tp_distance} "
+          f"SL={signal['stop_loss']} TP={signal['take_profit']}")
     signal_result["data"] = signal
     return signal_result
 

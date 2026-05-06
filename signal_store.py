@@ -124,16 +124,24 @@ def read_signal_rows(signals_file=None):
 
 
 def read_latest_signals(signals_file=None):
-    latest_by_timestamp = {}
+    # Deduplicate by (timestamp, signal, entry_price) so multiple trades at the
+    # same clock second (common when coins run in parallel) are all preserved.
+    seen = {}
     order = []
     for row in parse_coin_csv(signals_file or SIGNALS_FILE):
         timestamp = row.get("timestamp")
         if not timestamp:
             continue
-        if timestamp not in latest_by_timestamp:
-            order.append(timestamp)
-        latest_by_timestamp[timestamp] = row
-    return [latest_by_timestamp[timestamp] for timestamp in order]
+        key = (
+            timestamp,
+            row.get("signal", ""),
+            str(row.get("entry_price", "")),
+            str(row.get("stop_loss", "")),
+        )
+        if key not in seen:
+            order.append(key)
+        seen[key] = row
+    return [seen[k] for k in order]
 
 
 def append_signal_row(row, signals_file=None):
