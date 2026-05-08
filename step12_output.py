@@ -5,9 +5,13 @@ from dotenv import load_dotenv
 from signal_store import append_signal_row, read_latest_signals
 from time_utils import now_pacific_str
 from project_logger import record_trade_outcome
+from trade_store_integration import (
+    save_signal_to_store, close_signal_in_store, find_trade_by_timestamp
+)
 
 load_dotenv()
 ACTIVE_MONITORS = set()  # stores "coin_name:timestamp" keys
+TRADE_ID_MAP = {}  # maps "coin_name:timestamp" -> trade_id from SQLite
 
 
 def get_current_price(symbol="XETHZUSD"):
@@ -71,6 +75,20 @@ def save_signal(signal, overrides, filtered_indicators=None,
     }
 
     append_signal_row(row, signals_file)
+
+    # Save to SQLite store (primary storage going forward)
+    try:
+        trade_id = save_signal_to_store(
+            coin_name=coin_name,
+            signal=signal,
+            risk_amount=risk_per_trade,
+            reward_amount=reward_per_trade,
+        )
+        TRADE_ID_MAP[f"{coin_name}:{row['timestamp']}"] = trade_id
+        print(f"[STORE] Trade {trade_id} saved to SQLite")
+    except Exception as e:
+        print(f"[STORE] Warning: Failed to save to SQLite: {e}")
+        # Continue anyway — CSV is still being written
 
     # ── PRINT OUTPUT ──────────────────────────────────────────────
     price_str = f"${price:,.4f}" if price else "unavailable"
@@ -281,6 +299,26 @@ def _update_outcome(timestamp, outcome, close_price, signals_file=None, coin_nam
             row["close_price"] = close_price
             row["close_time"]  = now_pacific_str()
             append_signal_row(row, signals_file)
+
+            # Close in SQLite (primary storage)
+            map_key = f"{coin_name}:{timestamp}"
+            trade_id = TRADE_ID_MAP.get(map_key)
+            if trade_id is not None:
+                try:
+                    close_signal_in_store(trade_id, close_price, outcome)
+                    print(f"[STORE] Trade {trade_id} closed in SQLite")
+                except Exception as e:
+                    print(f"[STORE] Warning: Failed to close in SQLite: {e}")
+            else:
+                # Try to find by timestamp if ID not in map
+                try:
+                    trade = find_trade_by_timestamp(timestamp, coin_name)
+                    if trade:
+                        close_signal_in_store(trade["id"], close_price, outcome)
+                        print(f"[STORE] Trade {trade['id']} closed in SQLite (found by timestamp)")
+                except Exception as e:
+                    print(f"[STORE] Warning: Could not find/close trade in SQLite: {e}")
+
             direction = row.get("direction") or ("SHORT" if row.get("signal") == "Sell" else "LONG")
             # Use the stored amounts from the opening row — correct amounts at time of entry
             stored_risk   = row.get("risk_amount")

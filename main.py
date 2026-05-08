@@ -264,7 +264,10 @@ def run_all_cycles():
         try:
             run_cycle(coin)
         except Exception as e:
+            import traceback
             print(f"[{coin['name']}][ERROR] Unhandled cycle error: {e}")
+            print(f"[{coin['name']}][ERROR] Traceback:")
+            traceback.print_exc()
 
     for coin in COINS:
         t = threading.Thread(target=run_coin_safe, args=(coin,), daemon=True)
