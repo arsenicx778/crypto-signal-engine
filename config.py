@@ -78,6 +78,6 @@ ENABLE_SHORTS             = True
 # ── Operational flags ──────────────────────────────────────────────────────────
 LIVE_TRADING_ENABLED        = True
 LIVE_TRADING_PAUSE_REASON   = ""
-SUSPENDED_COINS             = ["SOL", "XRP", "LINK"]
+SUSPENDED_COINS             = []
 LIVE_LEARNING_ENABLED       = False
 HISTORICAL_LEARNING_ENABLED = True

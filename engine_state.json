@@ -1,19 +1,19 @@
 {
-  "last_updated": "2026-05-05 17:25:19",
-  "cycle_counter": 2475,
+  "last_updated": "2026-05-08 14:13:03",
+  "cycle_counter": 931,
   "coins": {
     "ETH": {
-      "capital": 652.6700000000003,
+      "capital": 1000.0,
       "open_longs": 0,
-      "open_shorts": 2,
+      "open_shorts": 0,
       "last_learn_cycle": 0,
-      "consecutive_losses": 2,
+      "consecutive_losses": 0,
       "last_signal_direction": "",
       "last_signal_time": ""
     },
     "SOL": {
-      "capital": 1028.1899999999998,
-      "open_longs": 1,
+      "capital": 1000.0,
+      "open_longs": 0,
       "open_shorts": 0,
       "last_learn_cycle": 0,
       "consecutive_losses": 0,
@@ -21,26 +21,17 @@
       "last_signal_time": ""
     },
     "XRP": {
-      "capital": 862.6699999999998,
+      "capital": 1000.0,
       "open_longs": 0,
       "open_shorts": 0,
-      "last_learn_cycle": 0,
-      "consecutive_losses": 2,
-      "last_signal_direction": "",
-      "last_signal_time": ""
-    },
-    "AVAX": {
-      "capital": 1000.0,
-      "open_longs": 1,
-      "open_shorts": 1,
       "last_learn_cycle": 0,
       "consecutive_losses": 0,
       "last_signal_direction": "",
       "last_signal_time": ""
     },
     "LINK": {
-      "capital": 1027.16,
-      "open_longs": 1,
+      "capital": 1000.0,
+      "open_longs": 0,
       "open_shorts": 0,
       "last_learn_cycle": 0,
       "consecutive_losses": 0,
