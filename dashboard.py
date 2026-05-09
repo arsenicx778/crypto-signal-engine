@@ -22,7 +22,6 @@ KRAKEN_PAIRS = {
 }
 
 _BASE = os.path.dirname(os.path.abspath(__file__))
-COIN_CSV_FILES = dm.COIN_CSV_FILES
 
 
 def fetch_coin_price(coin):
