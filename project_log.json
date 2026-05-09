@@ -25,12 +25,12 @@
         "reward_risk_ratio": 1.5
       },
       "results": {
-        "trades": 211,
-        "wins": 78,
-        "losses": 133,
-        "win_rate": 37,
+        "trades": 225,
+        "wins": 85,
+        "losses": 140,
+        "win_rate": 38,
         "capital_start": 4000,
-        "capital_end": 3479.67
+        "capital_end": 3504.67
       },
       "notes": "Fresh multi-coin reset on 2026-04-23. ETH/SOL/AVAX/XRP paper trading restart from clean state."
     }
@@ -70,29 +70,29 @@
     "paper_trading_start": "2026-04-23"
   },
   "totals": {
-    "all_time_trades": 211,
-    "all_time_wins": 78,
-    "all_time_losses": 133,
-    "all_time_win_rate": 37,
+    "all_time_trades": 225,
+    "all_time_wins": 85,
+    "all_time_losses": 140,
+    "all_time_win_rate": 38,
     "peak_capital": 4020.9,
     "sessions_run": 1,
     "per_coin": {
       "ETH": {
-        "capital": 521.94,
-        "trades": 117,
-        "wins": 38,
-        "losses": 79,
+        "capital": 510.27,
+        "trades": 120,
+        "wins": 39,
+        "losses": 81,
         "win_rate": 32,
-        "long_trades": 70,
-        "short_trades": 47
+        "long_trades": 71,
+        "short_trades": 49
       },
       "SOL": {
-        "capital": 1288.41,
-        "trades": 35,
-        "wins": 23,
+        "capital": 1308.32,
+        "trades": 36,
+        "wins": 24,
         "losses": 12,
-        "win_rate": 66,
-        "long_trades": 31,
+        "win_rate": 67,
+        "long_trades": 32,
         "short_trades": 4
       },
       "AVAX": {
@@ -105,21 +105,21 @@
         "short_trades": 3
       },
       "XRP": {
-        "capital": 738.33,
-        "trades": 37,
+        "capital": 685.41,
+        "trades": 41,
         "wins": 9,
-        "losses": 28,
-        "win_rate": 24,
-        "long_trades": 16,
+        "losses": 32,
+        "win_rate": 22,
+        "long_trades": 20,
         "short_trades": 21
       },
       "LINK": {
-        "capital": 1009.01,
-        "trades": 18,
-        "wins": 8,
-        "losses": 10,
-        "win_rate": 44,
-        "long_trades": 13,
+        "capital": 1078.69,
+        "trades": 24,
+        "wins": 13,
+        "losses": 11,
+        "win_rate": 54,
+        "long_trades": 19,
         "short_trades": 5
       }
     }

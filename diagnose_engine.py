@@ -132,7 +132,7 @@ def diagnose():
     print("""
   Stale trades blocking gates:  python fix_stale_trades.py --apply
   View full health report:       python health_check.py
-  View trade dashboard:          python dashboard_sqlite.py
+  View trade dashboard:          python dashboard.py
   Test a single coin cycle:      python -c "from main import run_cycle, COINS; run_cycle(COINS[0])"
     """)
 
