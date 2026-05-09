@@ -8,30 +8,46 @@ import sys
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from signal_store import read_latest_signals
+from trade_store import get_trade_store
 
 COINS = ["ETH", "SOL", "XRP", "LINK"]
-CSV_MAP = {c: f"{c.lower()}_signals.csv" for c in COINS}
 STARTING_CAPITAL = 1000.0
 NOW = datetime.now()
 NOW_STR = NOW.strftime("%Y-%m-%d %H:%M")
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
+def _unpack_meta(trade: dict) -> dict:
+    row = dict(trade)
+    try:
+        meta = json.loads(row.get("metadata") or "{}")
+    except Exception:
+        meta = {}
+    for k in ("ta_summary", "sentiment_summary", "history_summary",
+              "decision_rationale", "overrides", "indicators"):
+        row.setdefault(k, meta.get(k))
+    if row.get("state") == "PENDING":
+        row["outcome"] = "pending"
+    return row
+
+
 def load_rows(coin):
-    """Return dedup'd rows from coin CSV using project's canonical read_latest_signals."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CSV_MAP[coin])
-    return read_latest_signals(path)
+    """Return all trades for coin from SQLite with metadata unpacked."""
+    store = get_trade_store()
+    return [_unpack_meta(t) for t in store.get_all_trades(coin=coin)]
+
 
 def completed_trades(rows):
     """Rows with W or L outcome AND a non-empty close_time — never pending."""
     return [r for r in rows if r.get("outcome") in ("W", "L")
             and str(r.get("close_time", "")).strip()]
 
+
 def open_trades(rows):
     """Pending Buy/Sell rows (actual trades, not Do Not Enter)."""
     return [r for r in rows if r.get("outcome") == "pending"
             and r.get("signal") in ("Buy", "Sell")]
+
 
 def compute_capital(completed):
     cap = STARTING_CAPITAL
@@ -47,10 +63,12 @@ def compute_capital(completed):
             cap -= risk
     return cap
 
+
 def win_rate(completed):
     if not completed:
         return 0.0
     return sum(1 for r in completed if r["outcome"] == "W") / len(completed) * 100
+
 
 def hours_open(ts_str):
     try:
@@ -60,11 +78,13 @@ def hours_open(ts_str):
     except Exception:
         return 0.0
 
+
 def parse_float(v):
     try:
         return float(v or 0)
     except (ValueError, TypeError):
         return None
+
 
 def fmt_status(val, good_thresh, warn_thresh, higher_is_better=True):
     if higher_is_better:
@@ -80,6 +100,7 @@ def fmt_status(val, good_thresh, warn_thresh, higher_is_better=True):
             return "⚠"
         return "✗"
 
+
 def load_learn_state(coin):
     path = f"{coin.lower()}_learn_state.json"
     if not os.path.exists(path):
@@ -89,6 +110,7 @@ def load_learn_state(coin):
             return json.load(f)
     except Exception:
         return {"last_run_time": None, "last_trade_count": 0, "processed_trade_keys": []}
+
 
 def load_learning(coin):
     path = f"{coin.lower()}_learning.json"
@@ -100,6 +122,7 @@ def load_learning(coin):
     except Exception:
         return None
 
+
 def load_engine_state():
     path = "engine_state.json"
     if not os.path.exists(path):
@@ -109,6 +132,7 @@ def load_engine_state():
             return json.load(f)
     except Exception:
         return {}
+
 
 def all_timestamps(coin_rows_map):
     all_ts = []
@@ -191,7 +215,6 @@ for c in COINS:
         sl = parse_float(r.get("stop_loss"))
         tp = parse_float(r.get("take_profit"))
         hrs = hours_open(r.get("timestamp",""))
-        # Use last row's entry_price as proxy for current price (no live data)
         last_ep = parse_float(coin_rows[c][-1].get("entry_price")) if coin_rows[c] else None
         if last_ep and ep:
             in_profit = (last_ep > ep) if direction == "LONG" else (last_ep < ep)
@@ -261,12 +284,10 @@ for c in COINS:
 # ── COST ESTIMATE ──────────────────────────────────────────────────────────────
 print(SEP)
 print("COST ESTIMATE")
-# Brain (Sonnet) called once per cycle per coin. Sentiment cached 15min window.
 cycles_24h = max(1, signals_24h // max(1, len(COINS)))
-sonnet_calls = signals_24h  # one per row (each row = one brain call)
-haiku_calls = max(0, total_completed // 3)  # approx: every 3 new completed trades
+sonnet_calls = signals_24h
+haiku_calls = max(0, total_completed // 3)
 
-# Sentiment: 15-min cache, 3-min cycles → ~5 hits per cache fill → ~80% hit rate estimate
 sentiment_hit_rate = 0.80
 
 sonnet_in_cost = sonnet_calls * 3000 / 1e6 * 3.00
@@ -285,23 +306,19 @@ print(f"  Estimated total: ${total_cost:.4f}")
 print(SEP)
 print("GO-LIVE PROGRESS")
 
-# Win rate ≥ 60%
 wr_gap = 60.0 - overall_wr
 wr_icon = "✓" if overall_wr >= 60 else ("⚠" if overall_wr >= 45 else "✗")
 print(f"  {wr_icon} Win rate ≥60%:        current={overall_wr:.1f}%  gap={wr_gap:+.1f}%")
 
-# Completed trades ≥ 200
 tc_gap = 200 - total_completed
 tc_icon = "✓" if total_completed >= 200 else "✗"
 print(f"  {tc_icon} Trades ≥200:          current={total_completed}  remaining={max(0,tc_gap)}")
 
-# 7 stable days
 days_icon = "✓" if days_running >= 7 else "⚠" if days_running >= 3 else "✗"
 print(f"  {days_icon} 7 stable days:       running={days_running}d  gap={max(0,7-days_running)}d")
 
-# Shorts tested 1 week
 has_shorts = any(
-    r.get("direction") == "SHORT" and r.get("signal") in ("Buy","Sell")
+    r.get("direction") == "SHORT" and r.get("signal") in ("Buy", "Sell")
     for c in COINS for r in coin_rows[c]
 )
 if has_shorts and first_short_ts:
@@ -315,13 +332,11 @@ if has_shorts and first_short_ts:
 else:
     print(f"  ✗ Shorts 1 week:       no short trades found")
 
-# All coins profitable
 profitable = [c for c in COINS if coin_capital[c] >= STARTING_CAPITAL]
 losing = [c for c in COINS if coin_capital[c] < STARTING_CAPITAL]
 profit_icon = "✓" if not losing else ("⚠" if len(losing) <= 1 else "✗")
 print(f"  {profit_icon} All coins profitable: above={profitable}  below={losing}")
 
-# Cloud deployed
 cloud_env = os.environ.get("CLOUD_DEPLOYED") or os.environ.get("FLY_APP_NAME") or os.environ.get("RENDER_SERVICE_ID")
 cloud_icon = "✓" if cloud_env else "✗"
 cloud_str = cloud_env if cloud_env else "NOT STARTED"

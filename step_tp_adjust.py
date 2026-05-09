@@ -2,7 +2,7 @@ import json
 import anthropic
 import requests
 from dotenv import load_dotenv
-from signal_store import append_signal_row, read_latest_signals
+from trade_store import get_trade_store
 from time_utils import now_pacific_clock
 
 load_dotenv()
@@ -26,14 +26,35 @@ def get_current_price(symbol="XETHZUSD"):
         return None
 
 
-def get_open_trade(signals_file=None):
+def _unpack_trade(trade: dict) -> dict:
+    """Unpack metadata JSON into top-level keys."""
+    row = dict(trade)
     try:
-        rows = read_latest_signals(signals_file)
-        open_trades = [
-            r for r in rows
-            if r.get("signal") == "Buy" and r.get("outcome", "pending") == "pending"
+        meta = json.loads(row.get("metadata") or "{}")
+    except Exception:
+        meta = {}
+    row["tp_adjustments"]   = meta.get("tp_adjustments", 0)
+    row["tp_adjustment_log"] = meta.get("tp_adjustment_log", "")
+    return row
+
+
+def get_open_trade(coin_name=None, signals_file=None):
+    """Get the most recent open Buy trade for the coin from SQLite."""
+    if coin_name is None and signals_file:
+        import os
+        base = os.path.basename(signals_file or "")
+        coin_name = base.replace("_signals.csv", "").upper()
+    if not coin_name:
+        coin_name = "ETH"
+    try:
+        store = get_trade_store()
+        pending = [
+            t for t in store.get_pending_trades(coin=coin_name)
+            if t.get("signal") == "Buy"
         ]
-        return open_trades[-1] if open_trades else None
+        if not pending:
+            return None
+        return _unpack_trade(pending[-1])
     except:
         return None
 
@@ -138,22 +159,35 @@ If adjusting, set new TP conservatively — this is day trading, not investing."
         return None
 
 
-def apply_tp_adjustment(trade_timestamp, new_tp, adjustments_used, reason, signals_file=None):
-    for row in reversed(read_latest_signals(signals_file)):
-        if row["timestamp"] != trade_timestamp:
-            continue
-        row["take_profit"]      = new_tp
-        row["tp_adjustments"]   = adjustments_used
-        log = row.get("tp_adjustment_log", "") or ""
-        timestamp = now_pacific_clock()
-        row["tp_adjustment_log"] = f"{log} | [{timestamp}] TP->${new_tp:,.4f}: {reason}".strip(" |")
-        append_signal_row(row, signals_file)
-        print(f"[TP] CSV appended — adjustment {adjustments_used}/{MAX_ADJUSTMENTS} applied")
-        break
+def apply_tp_adjustment(trade_id, new_tp, adjustments_used, reason):
+    """Update the trade's take_profit in SQLite."""
+    store = get_trade_store()
+    timestamp = now_pacific_clock()
+    # Build log string
+    trade = None
+    with store.get_connection() as conn:
+        row = conn.execute("SELECT metadata FROM trades WHERE id=?", (trade_id,)).fetchone()
+        if row:
+            try:
+                meta = json.loads(row[0] or "{}")
+            except Exception:
+                meta = {}
+            old_log = meta.get("tp_adjustment_log", "") or ""
+            new_log = f"{old_log} | [{timestamp}] TP->${new_tp:,.4f}: {reason}".strip(" |")
+    store.update_trade_tp(trade_id, new_tp, adjustments_used, new_log)
+    print(f"[TP] SQLite updated — adjustment {adjustments_used}/{MAX_ADJUSTMENTS} applied")
 
 
-def run_tp_adjustment(sentiment, signals_file=None, symbol="XETHZUSD"):
-    trade = get_open_trade(signals_file)
+def run_tp_adjustment(sentiment, coin_name=None, signals_file=None, symbol="XETHZUSD"):
+    # coin_name preferred; accept signals_file for backward compat
+    if coin_name is None and signals_file:
+        import os
+        base = os.path.basename(signals_file or "")
+        coin_name = base.replace("_signals.csv", "").upper()
+    if not coin_name:
+        coin_name = "ETH"
+
+    trade = get_open_trade(coin_name=coin_name)
 
     if not trade:
         return
@@ -161,15 +195,18 @@ def run_tp_adjustment(sentiment, signals_file=None, symbol="XETHZUSD"):
     result = check_tp_adjustment(trade, sentiment, symbol=symbol)
 
     if result:
-        apply_tp_adjustment(
-            trade["timestamp"],
-            result["new_take_profit"],
-            result["adjustments_used"],
-            result["reason"],
-            signals_file=signals_file,
-        )
+        trade_id = trade.get("id")
+        if trade_id:
+            apply_tp_adjustment(
+                trade_id,
+                result["new_take_profit"],
+                result["adjustments_used"],
+                result["reason"],
+            )
+        else:
+            print("[TP] Warning: trade has no id — cannot update SQLite")
 
 
 if __name__ == "__main__":
     test_sentiment = {"news_score": 0.85, "headline_count": 18}
-    run_tp_adjustment(test_sentiment)
+    run_tp_adjustment(test_sentiment, coin_name="ETH")

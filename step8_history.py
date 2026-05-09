@@ -1,17 +1,50 @@
+import json
 import anthropic
 from dotenv import load_dotenv
-from signal_store import read_latest_signals
+from trade_store import get_trade_store
 
 load_dotenv()
 client = anthropic.Anthropic()
 
-def load_history(n=10, signals_file=None):
+
+def _unpack_metadata(trade: dict) -> dict:
+    """Unpack metadata JSON into top-level keys for backward compat."""
+    row = dict(trade)
     try:
-        rows = read_latest_signals(signals_file)
-        return rows[-n:] if len(rows) >= n else rows
+        meta = json.loads(row.get("metadata") or "{}")
+    except Exception:
+        meta = {}
+    for key in ("ta_summary", "sentiment_summary", "history_summary",
+                "decision_rationale", "overrides", "indicators",
+                "tp_adjustments", "tp_adjustment_log"):
+        row.setdefault(key, meta.get(key))
+    # Map state/outcome to CSV-compatible "outcome" field
+    if row.get("state") == "PENDING":
+        row["outcome"] = "pending"
+    elif row.get("state") == "CLOSED":
+        row["outcome"] = row.get("outcome") or "pending"
+    elif row.get("state") == "DNE":
+        row["outcome"] = "pending"
+    return row
+
+
+def load_history(n=10, coin_name=None, signals_file=None):
+    """Load last N trades from SQLite for the given coin."""
+    # coin_name preferred; fall back to deriving from signals_file path
+    if coin_name is None and signals_file:
+        import os
+        base = os.path.basename(signals_file or "")
+        coin_name = base.replace("_signals.csv", "").upper()
+    if not coin_name:
+        coin_name = "ETH"
+    try:
+        store = get_trade_store()
+        trades = store.get_recent_trades(coin=coin_name, n=n)
+        return [_unpack_metadata(t) for t in trades]
     except Exception as e:
         print(f"[WARN] Could not load history: {e}")
         return []
+
 
 def summarize_history(history):
     if not history:

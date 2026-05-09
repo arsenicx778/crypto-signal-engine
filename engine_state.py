@@ -3,7 +3,7 @@ import os
 import tempfile
 
 from time_utils import now_pacific_str
-from signal_store import read_latest_signals
+from trade_store import get_trade_store
 
 STATE_FILE = "engine_state.json"
 COINS = ["ETH", "SOL", "XRP", "LINK"]
@@ -69,30 +69,29 @@ def save_state(state: dict):
         raise
 
 
-def reconcile_state_with_csv(state: dict, coin_csv_map: dict) -> dict:
-    for coin, csv_path in coin_csv_map.items():
-        if not os.path.exists(csv_path):
-            continue
+def reconcile_state_with_db(state: dict) -> dict:
+    """Reconcile engine state from SQLite (replaces reconcile_state_with_csv)."""
+    store = get_trade_store()
 
+    for coin in COINS:
         coin_state = state.setdefault("coins", {})
         if coin not in coin_state:
             coin_state[coin] = _default_coin_state()
         cs = coin_state[coin]
 
-        # Use read_latest_signals so deduplication is applied — same view as the gate/monitor
         try:
-            rows = read_latest_signals(csv_path)
+            completed_rows = store.get_completed_trades(coin=coin)
         except Exception:
             continue
 
         # Recalculate capital from completed trades
         capital = DEFAULT_CAPITAL
         completed = []
-        for row in rows:
-            outcome = str(row.get("outcome", "")).strip()
+        for trade in completed_rows:
+            outcome = str(trade.get("outcome", "")).strip()
             try:
-                risk   = float(row.get("risk_amount",   0) or 0)
-                reward = float(row.get("reward_amount", 0) or 0)
+                risk   = float(trade.get("risk_amount",   0) or 0)
+                reward = float(trade.get("reward_amount", 0) or 0)
             except (ValueError, TypeError):
                 continue
             if outcome == "W":
@@ -104,16 +103,18 @@ def reconcile_state_with_csv(state: dict, coin_csv_map: dict) -> dict:
 
         cs["capital"] = max(0.0, capital)
 
-        # Count open trades by direction using deduplicated rows
+        # Count open trades by direction
         open_longs = open_shorts = 0
-        for row in rows:
-            outcome   = str(row.get("outcome",   "")).strip()
-            direction = str(row.get("direction", "")).strip().upper()
-            if outcome == "pending":
-                if direction == "LONG":
-                    open_longs += 1
-                elif direction == "SHORT":
-                    open_shorts += 1
+        try:
+            pending = store.get_pending_trades(coin=coin)
+        except Exception:
+            pending = []
+        for trade in pending:
+            direction = str(trade.get("direction", "")).strip().upper()
+            if direction == "LONG":
+                open_longs += 1
+            elif direction == "SHORT":
+                open_shorts += 1
 
         cs["open_longs"]  = open_longs
         cs["open_shorts"] = open_shorts
@@ -128,6 +129,11 @@ def reconcile_state_with_csv(state: dict, coin_csv_map: dict) -> dict:
         cs["consecutive_losses"] = consecutive_losses
 
     return state
+
+
+def reconcile_state_with_csv(state: dict, coin_csv_map: dict = None) -> dict:
+    """Backward-compatible alias — now reads from SQLite."""
+    return reconcile_state_with_db(state)
 
 
 def get_coin_state(state: dict, coin: str) -> dict:

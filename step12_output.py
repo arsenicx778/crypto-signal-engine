@@ -1,13 +1,11 @@
+import json
 import time
 import threading
 import requests
 from dotenv import load_dotenv
-from signal_store import append_signal_row, read_latest_signals
+from trade_store import get_trade_store
 from time_utils import now_pacific_str
 from project_logger import record_trade_outcome
-from trade_store_integration import (
-    save_signal_to_store, close_signal_in_store, find_trade_by_timestamp
-)
 
 load_dotenv()
 ACTIVE_MONITORS = set()  # stores "coin_name:timestamp" keys
@@ -51,6 +49,19 @@ def save_signal(signal, overrides, filtered_indicators=None,
     risk_amount   = risk_per_trade   if risk_per_trade   is not None else signal.get("risk_amount")
     reward_amount = reward_per_trade if reward_per_trade is not None else signal.get("reward_amount")
 
+    # Build metadata dict for SQLite
+    metadata = {
+        "ta_summary":         signal["reasoning"].get("ta_summary"),
+        "sentiment_summary":  signal["reasoning"].get("sentiment_summary"),
+        "history_summary":    signal["reasoning"].get("history_summary"),
+        "decision_rationale": signal["reasoning"].get("decision_rationale"),
+        "overrides":          " | ".join(overrides) if overrides else None,
+        "indicators":         indicators,
+        "tp_adjustments":     0,
+        "tp_adjustment_log":  None,
+    }
+
+    # Build a row dict for backward compat return value and printing
     row = {
         "timestamp":          timestamp,
         "signal":             signal.get("signal"),
@@ -64,31 +75,29 @@ def save_signal(signal, overrides, filtered_indicators=None,
         "outcome":            "pending",
         "close_price":        None,
         "close_time":         None,
-        "ta_summary":         signal["reasoning"].get("ta_summary"),
-        "sentiment_summary":  signal["reasoning"].get("sentiment_summary"),
-        "history_summary":    signal["reasoning"].get("history_summary"),
-        "decision_rationale": signal["reasoning"].get("decision_rationale"),
-        "overrides":          " | ".join(overrides) if overrides else None,
-        "indicators":         indicators,
-        "tp_adjustments":     0,
-        "tp_adjustment_log":  None,
+        **metadata,
     }
 
-    append_signal_row(row, signals_file)
-
-    # Save to SQLite store (primary storage going forward)
+    # Save to SQLite (primary / only storage)
     try:
-        trade_id = save_signal_to_store(
-            coin_name=coin_name,
-            signal=signal,
-            risk_amount=risk_per_trade,
-            reward_amount=reward_per_trade,
+        store = get_trade_store()
+        trade_id = store.create_signal(
+            coin=coin_name,
+            timestamp=timestamp,
+            signal=signal.get("signal"),
+            direction=signal.get("direction"),
+            confidence=signal.get("confidence", 0),
+            entry_price=signal.get("entry_price"),
+            stop_loss=signal.get("stop_loss"),
+            take_profit=signal.get("take_profit"),
+            risk_amount=risk_amount or 0,
+            reward_amount=reward_amount or 0,
+            metadata=metadata,
         )
-        TRADE_ID_MAP[f"{coin_name}:{row['timestamp']}"] = trade_id
+        TRADE_ID_MAP[f"{coin_name}:{timestamp}"] = trade_id
         print(f"[STORE] Trade {trade_id} saved to SQLite")
     except Exception as e:
         print(f"[STORE] Warning: Failed to save to SQLite: {e}")
-        # Continue anyway — CSV is still being written
 
     # ── PRINT OUTPUT ──────────────────────────────────────────────
     price_str = f"${price:,.4f}" if price else "unavailable"
@@ -125,18 +134,32 @@ def save_signal(signal, overrides, filtered_indicators=None,
     return row
 
 
-def _get_trade_by_timestamp(timestamp, signals_file=None):
-    rows = read_latest_signals(signals_file)
-    for row in reversed(rows):
-        if row.get("timestamp") == timestamp:
-            return row
-    return None
+def _get_trade_by_timestamp(timestamp, coin_name="ETH"):
+    """Find trade in SQLite by timestamp and unpack metadata."""
+    try:
+        store = get_trade_store()
+        trade = store.find_by_timestamp(timestamp, coin=coin_name)
+        if not trade:
+            return None
+        # Unpack metadata into top-level keys
+        try:
+            meta = json.loads(trade.get("metadata") or "{}")
+        except Exception:
+            meta = {}
+        result = dict(trade)
+        result.update(meta)
+        # Map state to outcome field
+        if result.get("state") == "PENDING":
+            result["outcome"] = "pending"
+        return result
+    except Exception:
+        return None
 
 
 def monitor_price(timestamp, stop_loss=None, take_profit=None,
                   symbol="XETHZUSD", signals_file=None, coin_name="ETH",
                   direction="LONG"):
-    trade = _get_trade_by_timestamp(timestamp, signals_file)
+    trade = _get_trade_by_timestamp(timestamp, coin_name=coin_name)
     if not trade:
         print(f"[MONITOR:{coin_name}] No trade found for {timestamp}")
         return
@@ -158,7 +181,7 @@ def monitor_price(timestamp, stop_loss=None, take_profit=None,
             dir_label = "SHORT" if is_short else "LONG"
             print(f"[MONITOR:{coin_name}] Watching {dir_label} trade {timestamp}")
             while True:
-                latest_trade = _get_trade_by_timestamp(timestamp, signals_file)
+                latest_trade = _get_trade_by_timestamp(timestamp, coin_name=coin_name)
                 if not latest_trade:
                     print(f"[MONITOR:{coin_name}] Trade {timestamp} no longer found")
                     break
@@ -194,21 +217,21 @@ def monitor_price(timestamp, stop_loss=None, take_profit=None,
                     if is_short:
                         # Short: win when price falls to TP, lose when price rises to SL
                         if price <= tp_live:
-                            _update_outcome(timestamp, "W", price, signals_file, coin_name)
+                            _update_outcome(timestamp, "W", price, coin_name)
                             print(f"[MONITOR:{coin_name}] SHORT TAKE PROFIT HIT at ${price:,.4f} — trade marked W")
                             break
                         if price >= sl_live:
-                            _update_outcome(timestamp, "L", price, signals_file, coin_name)
+                            _update_outcome(timestamp, "L", price, coin_name)
                             print(f"[MONITOR:{coin_name}] SHORT STOP LOSS HIT at ${price:,.4f} — trade marked L")
                             break
                     else:
                         # Long: win when price rises to TP, lose when price falls to SL
                         if price <= sl_live:
-                            _update_outcome(timestamp, "L", price, signals_file, coin_name)
+                            _update_outcome(timestamp, "L", price, coin_name)
                             print(f"[MONITOR:{coin_name}] STOP LOSS HIT at ${price:,.4f} — trade marked L")
                             break
                         if price >= tp_live:
-                            _update_outcome(timestamp, "W", price, signals_file, coin_name)
+                            _update_outcome(timestamp, "W", price, coin_name)
                             print(f"[MONITOR:{coin_name}] TAKE PROFIT HIT at ${price:,.4f} — trade marked W")
                             break
                 except Exception as e:
@@ -222,53 +245,60 @@ def monitor_price(timestamp, stop_loss=None, take_profit=None,
 
 
 def resume_open_trade_monitor(signals_file=None, symbol="XETHZUSD", coin_name="ETH"):
-    rows = read_latest_signals(signals_file)
-    open_trades = [
-        row for row in rows
-        if row.get("signal") in ("Buy", "Sell") and row.get("outcome", "pending") == "pending"
-    ]
+    """Resume monitoring all pending Buy/Sell trades for a coin."""
+    try:
+        store = get_trade_store()
+        open_trades = [
+            t for t in store.get_pending_trades(coin=coin_name)
+            if t.get("signal") in ("Buy", "Sell")
+        ]
+    except Exception:
+        open_trades = []
+
     if not open_trades:
         return
     for trade in open_trades:
         sig = trade.get("signal")
         direction = "SHORT" if sig == "Sell" else "LONG"
-        print(f"[MONITOR:{coin_name}] Resuming open {direction} trade from {trade['timestamp']}")
-        monitor_price(trade["timestamp"], symbol=symbol,
-                      signals_file=signals_file, coin_name=coin_name,
-                      direction=direction)
+        ts = trade.get("timestamp")
+        print(f"[MONITOR:{coin_name}] Resuming open {direction} trade from {ts}")
+        monitor_price(ts, symbol=symbol, coin_name=coin_name, direction=direction)
 
 
 def reconcile_open_positions(signals_file=None, symbol="XETHZUSD", coin_name="ETH"):
-    """Scan CSV for pending positions with no active monitor thread and start one.
+    """Scan SQLite for pending positions with no active monitor thread and start one.
 
     Called on a 5-minute interval so any position opened after a crash/restart
     or missed by the initial resume sweep gets picked up automatically.
     """
-    rows = read_latest_signals(signals_file)
-    open_trades = [
-        row for row in rows
-        if row.get("signal") in ("Buy", "Sell") and row.get("outcome", "pending") == "pending"
-    ]
+    try:
+        store = get_trade_store()
+        open_trades = [
+            t for t in store.get_pending_trades(coin=coin_name)
+            if t.get("signal") in ("Buy", "Sell")
+        ]
+    except Exception:
+        open_trades = []
+
     for trade in open_trades:
-        monitor_key = f"{coin_name}:{trade['timestamp']}"
+        ts = trade.get("timestamp")
+        monitor_key = f"{coin_name}:{ts}"
         if monitor_key not in ACTIVE_MONITORS:
             sig = trade.get("signal")
             direction = "SHORT" if sig == "Sell" else "LONG"
             print(f"[MONITOR:{coin_name}] reconcile — found unmonitored {direction} from "
-                  f"{trade['timestamp']} — starting monitor thread")
-            monitor_price(trade["timestamp"], symbol=symbol,
-                          signals_file=signals_file, coin_name=coin_name,
-                          direction=direction)
+                  f"{ts} — starting monitor thread")
+            monitor_price(ts, symbol=symbol, coin_name=coin_name, direction=direction)
 
 
-# Per-coin reconcile config: symbol and signals file, populated by start_reconcile_loop()
+# Per-coin reconcile config: symbol, populated by start_reconcile_loop()
 _RECONCILE_COINS: list[dict] = []
 
 
 def start_reconcile_loop(coins: list[dict]):
     """Start a background thread that calls reconcile_open_positions every 5 minutes.
 
-    coins: list of dicts with keys 'name', 'symbol', 'signals_file'
+    coins: list of dicts with keys 'name', 'symbol' (signals_file optional, ignored)
     Call once at engine startup after resume_open_trade_monitor.
     """
     global _RECONCILE_COINS
@@ -280,7 +310,6 @@ def start_reconcile_loop(coins: list[dict]):
             for coin in _RECONCILE_COINS:
                 try:
                     reconcile_open_positions(
-                        signals_file=coin["signals_file"],
                         symbol=coin["symbol"],
                         coin_name=coin["name"],
                     )
@@ -291,45 +320,56 @@ def start_reconcile_loop(coins: list[dict]):
     print(f"[MONITOR] Reconcile loop started — scanning every 5 minutes for unmonitored positions")
 
 
-def _update_outcome(timestamp, outcome, close_price, signals_file=None, coin_name="ETH"):
-    rows = read_latest_signals(signals_file)
-    for row in reversed(rows):
-        if row["timestamp"] == timestamp:
-            row["outcome"]     = outcome
-            row["close_price"] = close_price
-            row["close_time"]  = now_pacific_str()
-            append_signal_row(row, signals_file)
+def _update_outcome(timestamp, outcome, close_price, coin_name="ETH"):
+    """Close the trade in SQLite and log the outcome."""
+    store = get_trade_store()
+    close_time = now_pacific_str()
 
-            # Close in SQLite (primary storage)
-            map_key = f"{coin_name}:{timestamp}"
-            trade_id = TRADE_ID_MAP.get(map_key)
-            if trade_id is not None:
-                try:
-                    close_signal_in_store(trade_id, close_price, outcome)
-                    print(f"[STORE] Trade {trade_id} closed in SQLite")
-                except Exception as e:
-                    print(f"[STORE] Warning: Failed to close in SQLite: {e}")
-            else:
-                # Try to find by timestamp if ID not in map
-                try:
-                    trade = find_trade_by_timestamp(timestamp, coin_name)
-                    if trade:
-                        close_signal_in_store(trade["id"], close_price, outcome)
-                        print(f"[STORE] Trade {trade['id']} closed in SQLite (found by timestamp)")
-                except Exception as e:
-                    print(f"[STORE] Warning: Could not find/close trade in SQLite: {e}")
+    # Find trade_id
+    map_key  = f"{coin_name}:{timestamp}"
+    trade_id = TRADE_ID_MAP.get(map_key)
 
-            direction = row.get("direction") or ("SHORT" if row.get("signal") == "Sell" else "LONG")
-            # Use the stored amounts from the opening row — correct amounts at time of entry
-            stored_risk   = row.get("risk_amount")
-            stored_reward = row.get("reward_amount")
-            risk_amt   = float(stored_risk)   if stored_risk   else None
-            reward_amt = float(stored_reward) if stored_reward else None
-            record_trade_outcome(outcome, row.get("confidence"),
-                                 row.get("entry_price"), close_price,
-                                 coin=coin_name, direction=direction,
-                                 risk_amount=risk_amt, reward_amount=reward_amt)
-            break
+    trade = None
+    if trade_id is None:
+        trade = store.find_by_timestamp(timestamp, coin=coin_name)
+        if trade:
+            trade_id = trade["id"]
+
+    if trade_id is not None:
+        success = store.close_trade(trade_id, close_price, close_time, outcome)
+        if success:
+            print(f"[STORE] Trade {trade_id} closed in SQLite as {outcome}")
+        else:
+            print(f"[STORE] Warning: could not close trade {trade_id} (already closed?)")
+    else:
+        print(f"[STORE] Warning: trade for {coin_name}:{timestamp} not found in SQLite")
+
+    # Fetch full trade for logging (use already-fetched or re-fetch)
+    if trade is None and trade_id:
+        with store.get_connection() as conn:
+            row = conn.execute("SELECT * FROM trades WHERE id=?", (trade_id,)).fetchone()
+            trade = dict(row) if row else {}
+    if trade is None:
+        trade = {}
+
+    try:
+        meta = json.loads(trade.get("metadata") or "{}")
+    except Exception:
+        meta = {}
+
+    direction = trade.get("direction") or ("SHORT" if trade.get("signal") == "Sell" else "LONG")
+    risk_amt   = trade.get("risk_amount")
+    reward_amt = trade.get("reward_amount")
+    record_trade_outcome(
+        outcome,
+        trade.get("confidence"),
+        trade.get("entry_price"),
+        close_price,
+        coin=coin_name,
+        direction=direction,
+        risk_amount=float(risk_amt) if risk_amt else None,
+        reward_amount=float(reward_amt) if reward_amt else None,
+    )
 
 
 if __name__ == "__main__":

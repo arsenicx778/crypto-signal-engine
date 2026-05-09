@@ -220,6 +220,110 @@ class TradeStore:
                 "pending": pending,
             }
 
+    def get_all_trades(self, coin: Optional[str] = None, limit: Optional[int] = None) -> List[Dict]:
+        """Get ALL trades (PENDING, CLOSED, DNE) ordered by timestamp asc."""
+        with self.get_connection() as conn:
+            if coin:
+                rows = conn.execute(
+                    "SELECT * FROM trades WHERE coin=? ORDER BY timestamp ASC",
+                    (coin,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM trades ORDER BY timestamp ASC"
+                ).fetchall()
+            result = [dict(row) for row in rows]
+            if limit:
+                result = result[-limit:]
+            return result
+
+    def get_recent_trades(self, coin: str, n: int = 10) -> List[Dict]:
+        """Get the last N trades for a coin (all states)."""
+        return self.get_all_trades(coin=coin, limit=n)
+
+    def get_completed_trades(self, coin: Optional[str] = None) -> List[Dict]:
+        """Get all CLOSED trades with outcome W or L, ordered by close_time asc."""
+        with self.get_connection() as conn:
+            if coin:
+                rows = conn.execute(
+                    "SELECT * FROM trades WHERE coin=? AND state='CLOSED' AND outcome IN ('W','L') ORDER BY close_time ASC",
+                    (coin,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM trades WHERE state='CLOSED' AND outcome IN ('W','L') ORDER BY close_time ASC"
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    def get_current_capital(self, coin: str, capital_start: float = 1000.0) -> float:
+        """Replay closed trades to calculate current capital for a coin."""
+        capital = capital_start
+        completed = self.get_completed_trades(coin=coin)
+        for trade in completed:
+            outcome = trade.get("outcome")
+            risk = trade.get("risk_amount") or 0
+            reward = trade.get("reward_amount") or 0
+            if outcome == "W":
+                capital += float(reward) if reward else round(capital * 0.03, 2)
+            elif outcome == "L":
+                capital -= float(risk) if risk else round(capital * 0.02, 2)
+        return round(capital, 2)
+
+    def count_todays_signals(self, coin: str, today_str: str) -> int:
+        """Count all signals (any state) for a coin on a given date (YYYY-MM-DD)."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE coin=? AND timestamp LIKE ?",
+                (coin, f"{today_str}%"),
+            ).fetchone()
+            return row[0] if row else 0
+
+    def update_trade_tp(
+        self,
+        trade_id: int,
+        new_tp: float,
+        adjustment_count: int,
+        adjustment_log: str,
+    ) -> bool:
+        """Update take_profit and adjustment metadata on a PENDING trade."""
+        now = datetime.utcnow().isoformat()
+        with self.get_connection() as conn:
+            # Update take_profit and store adjustment data in metadata
+            trade_row = conn.execute(
+                "SELECT metadata FROM trades WHERE id=? AND state='PENDING'",
+                (trade_id,),
+            ).fetchone()
+            if not trade_row:
+                return False
+            try:
+                meta = json.loads(trade_row[0] or "{}")
+            except Exception:
+                meta = {}
+            meta["tp_adjustments"] = adjustment_count
+            meta["tp_adjustment_log"] = adjustment_log
+            cursor = conn.execute(
+                """UPDATE trades
+                   SET take_profit=?, metadata=?, updated_at=?
+                   WHERE id=? AND state='PENDING'""",
+                (new_tp, json.dumps(meta), now, trade_id),
+            )
+            return cursor.rowcount > 0
+
+    def find_by_timestamp(self, timestamp: str, coin: Optional[str] = None) -> Optional[Dict]:
+        """Find a trade by exact timestamp, optionally filtered by coin."""
+        with self.get_connection() as conn:
+            if coin:
+                row = conn.execute(
+                    "SELECT * FROM trades WHERE coin=? AND timestamp=? ORDER BY id DESC LIMIT 1",
+                    (coin, timestamp),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT * FROM trades WHERE timestamp=? ORDER BY id DESC LIMIT 1",
+                    (timestamp,),
+                ).fetchone()
+            return dict(row) if row else None
+
     def export_to_csv(self, output_path: str, coin: Optional[str] = None):
         """Export trades to CSV for analysis."""
         import csv

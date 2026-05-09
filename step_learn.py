@@ -33,7 +33,7 @@ import math
 import json
 from datetime import datetime
 from typing import Optional
-from signal_store import read_latest_signals
+from trade_store import get_trade_store
 from time_utils import now_pacific
 
 try:
@@ -58,13 +58,7 @@ _MIN_TRADES_OVERRIDE = {
 
 # ── coin config ───────────────────────────────────────────────────────────────
 
-COIN_CSV = {
-    "ETH":  "eth_signals.csv",
-    "SOL":  "sol_signals.csv",
-    "XRP":  "xrp_signals.csv",
-    "LINK": "link_signals.csv",
-    "LINK": "link_signals.csv",
-}
+COINS = ["ETH", "SOL", "XRP", "LINK"]
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -115,10 +109,9 @@ def reset_learning_for_coin(coin: str):
 
 def discover_resettable_coins() -> list:
     tracked = []
-    for coin, csv_file in COIN_CSV.items():
+    for coin in COINS:
         if (
-            os.path.exists(csv_file)
-            or os.path.exists(state_path(coin))
+            os.path.exists(state_path(coin))
             or os.path.exists(learning_path(coin))
             or os.path.exists(learning_history_path(coin))
         ):
@@ -137,20 +130,34 @@ def reset_learning_for_coins(coins: list):
 def completed_trade_key(row: dict) -> str:
     return str(row.get("timestamp", "")).strip()
 
-def load_completed_trades(csv_file: str) -> list:
-    if not os.path.exists(csv_file):
-        return []
+def _unpack_trade_meta(trade: dict) -> dict:
+    """Unpack metadata JSON into top-level keys for learning compatibility."""
+    row = dict(trade)
     try:
-        rows = read_latest_signals(csv_file)
+        meta = json.loads(row.get("metadata") or "{}")
+    except Exception:
+        meta = {}
+    for k in ("ta_summary", "sentiment_summary", "history_summary",
+              "decision_rationale", "overrides", "indicators",
+              "tp_adjustments", "tp_adjustment_log"):
+        row.setdefault(k, meta.get(k))
+    return row
+
+
+def load_completed_trades(coin: str) -> list:
+    """Load completed (W/L) Buy/Sell trades for a coin from SQLite."""
+    try:
+        store = get_trade_store()
+        trades = store.get_completed_trades(coin=coin)
+        rows = []
+        for t in trades:
+            row = _unpack_trade_meta(t)
+            if row.get("signal") in ("Buy", "Sell") and completed_trade_key(row):
+                rows.append(row)
+        return rows
     except Exception as e:
-        print(f"[LEARN] Error reading CSV: {e}")
+        print(f"[LEARN] Error reading SQLite: {e}")
         return []
-    return [
-        row for row in rows
-        if row.get("signal") in ("Buy", "Sell")
-        and str(row.get("outcome", "")).strip() in ("W", "L")
-        and completed_trade_key(row)
-    ]
 
 def get_new_completed_trade_keys(state: dict, completed_rows: list) -> list:
     keys = [completed_trade_key(row) for row in completed_rows]
@@ -171,9 +178,9 @@ def get_new_completed_trade_keys(state: dict, completed_rows: list) -> list:
         baseline = 0
     return keys[baseline:]
 
-def load_recent_completed_trades(csv_file: str, limit: int) -> list:
+def load_recent_completed_trades(coin: str, limit: int) -> list:
     completed = []
-    for row in load_completed_trades(csv_file):
+    for row in load_completed_trades(coin):
         outcome = row.get("outcome", "").strip()
         indicators = row.get("indicators", "")
         parsed = parse_indicators(indicators)
@@ -662,11 +669,8 @@ def run_learning_for_coin(coin: str) -> bool:
               f"(set LIVE_LEARNING_ENABLED=True to re-enable)")
         return False
 
-    csv_file = COIN_CSV.get(coin)
-    if not csv_file or not os.path.exists(csv_file):
-        return False
     state = read_state(coin)
-    completed_rows = load_completed_trades(csv_file)
+    completed_rows = load_completed_trades(coin)
     current_count = len(completed_rows)
 
     last_count = state.get("last_trade_count", 0)
@@ -686,7 +690,7 @@ def run_learning_for_coin(coin: str) -> bool:
     if new_trades < MIN_NEW_TRADES:
         print(f"[LEARN:{coin}] Only {new_trades} new trades since last run, need {MIN_NEW_TRADES}. Skipping.")
         return False
-    trades = load_recent_completed_trades(csv_file, MAX_TRADES_TO_ANALYZE)
+    trades = load_recent_completed_trades(coin, MAX_TRADES_TO_ANALYZE)
     skipped_malformed = current_count - len(trades) if current_count >= len(trades) else 0
     print(
         f"[LEARN:{coin}] {new_trades} new trades found. "
@@ -700,9 +704,14 @@ def run_learning_for_coin(coin: str) -> bool:
     weighted_patterns = build_weighted_patterns(trades)
     regime = compute_regime(trades)
 
-    # DNE analysis needs all CSV rows (not just completed trades)
+    # DNE analysis needs all rows (not just completed trades)
     try:
-        all_rows = read_latest_signals(csv_file)
+        store = get_trade_store()
+        all_rows = [_unpack_trade_meta(t) for t in store.get_all_trades(coin=coin)]
+        # Map state to outcome for evaluate_dne_signals compatibility
+        for row in all_rows:
+            if row.get("state") == "PENDING":
+                row["outcome"] = "pending"
     except Exception:
         all_rows = []
     dne_analysis = evaluate_dne_signals(all_rows)

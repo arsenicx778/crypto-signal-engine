@@ -1,17 +1,10 @@
 import threading
 from datetime import date
-from signal_store import read_latest_signals
+from trade_store import get_trade_store
 from config import RISK_PERCENT, REWARD_PERCENT
 
 MAX_DAILY_CALLS  = 8000
 CAPITAL          = 1000.0   # per-coin starting capital
-
-COIN_CSV = {
-    "ETH":  "eth_signals.csv",
-    "SOL":  "sol_signals.csv",
-    "LINK": "link_signals.csv",
-    "XRP":  "xrp_signals.csv",
-}
 
 _gate_lock = threading.Lock()
 gate_state = {
@@ -30,96 +23,83 @@ def get_risk_reward(coin_name):
     return risk, reward
 
 
-def count_todays_calls(signals_file=None):
+def count_todays_calls(coin_name):
     try:
+        store = get_trade_store()
         today = str(date.today())
-        count = 0
-        for row in read_latest_signals(signals_file):
-            if row.get("timestamp", "").startswith(today):
-                count += 1
-        return count
+        return store.count_todays_signals(coin_name, today)
     except:
         return 0
 
 
-def get_current_capital(signals_file=None, capital_start=CAPITAL):
-    """Replay all closed trades using their stored risk/reward amounts.
-    Falls back to percentage of running capital for legacy rows without stored amounts."""
+def get_current_capital(coin_name, capital_start=CAPITAL):
+    """Replay all closed trades from SQLite to compute current capital."""
     try:
-        capital = capital_start
-        for row in read_latest_signals(signals_file):
-            outcome = row.get("outcome", "pending")
-            if outcome not in ("W", "L"):
-                continue
-            stored_reward = row.get("reward_amount")
-            stored_risk   = row.get("risk_amount")
-            if outcome == "W":
-                reward = float(stored_reward) if stored_reward else round(capital * REWARD_PERCENT, 2)
-                capital += reward
-            else:
-                risk = float(stored_risk) if stored_risk else round(capital * RISK_PERCENT, 2)
-                capital -= risk
-        return round(capital, 2)
+        store = get_trade_store()
+        return store.get_current_capital(coin_name, capital_start)
     except:
         return capital_start
 
 
-def get_open_trades(signals_file=None):
+def get_open_trades(coin_name):
     """Returns all open trades (Buy + Sell) that are still pending."""
     try:
-        rows = read_latest_signals(signals_file)
+        store = get_trade_store()
         return [
-            r for r in rows
-            if r.get("signal") in ("Buy", "Sell") and r.get("outcome", "pending") == "pending"
+            t for t in store.get_pending_trades(coin=coin_name)
+            if t.get("signal") in ("Buy", "Sell")
         ]
     except:
         return []
 
 
-def get_open_longs(signals_file=None):
+def get_open_longs(coin_name):
     try:
-        rows = read_latest_signals(signals_file)
+        store = get_trade_store()
         return [
-            r for r in rows
-            if r.get("signal") == "Buy" and r.get("outcome", "pending") == "pending"
+            t for t in store.get_pending_trades(coin=coin_name)
+            if t.get("signal") == "Buy"
         ]
     except:
         return []
 
 
-def get_open_shorts(signals_file=None):
+def get_open_shorts(coin_name):
     try:
-        rows = read_latest_signals(signals_file)
+        store = get_trade_store()
         return [
-            r for r in rows
-            if r.get("signal") == "Sell" and r.get("outcome", "pending") == "pending"
+            t for t in store.get_pending_trades(coin=coin_name)
+            if t.get("signal") == "Sell"
         ]
     except:
         return []
 
 
-def get_open_trade(signals_file=None):
+def get_open_trade(coin_name):
     """Returns the most recent open trade, or None. Kept for backward compatibility."""
-    trades = get_open_trades(signals_file)
+    trades = get_open_trades(coin_name)
     return trades[-1] if trades else None
 
 
-def get_todays_stats(signals_file=None):
+def get_todays_stats(coin_name):
     try:
         today = str(date.today())
+        store = get_trade_store()
         wins = losses = pending_long = pending_short = 0
-        for row in read_latest_signals(signals_file):
-            if not row.get("timestamp", "").startswith(today):
+        for trade in store.get_all_trades(coin=coin_name):
+            ts = trade.get("timestamp", "")
+            if not ts.startswith(today):
                 continue
-            outcome = row.get("outcome", "pending")
-            sig = row.get("signal")
-            if outcome == "W":
+            state = trade.get("state", "")
+            sig   = trade.get("signal")
+            outcome = trade.get("outcome")
+            if state == "CLOSED" and outcome == "W":
                 wins += 1
-            elif outcome == "L":
+            elif state == "CLOSED" and outcome == "L":
                 losses += 1
-            elif outcome == "pending" and sig == "Buy":
+            elif state == "PENDING" and sig == "Buy":
                 pending_long += 1
-            elif outcome == "pending" and sig == "Sell":
+            elif state == "PENDING" and sig == "Sell":
                 pending_short += 1
         return {"wins": wins, "losses": losses,
                 "pending": pending_long + pending_short,
@@ -129,7 +109,6 @@ def get_todays_stats(signals_file=None):
 
 
 def _build_display_line():
-    """Read all 4 coin CSVs and return a combined status string."""
     parts = []
     for name in ["ETH", "SOL", "LINK", "XRP"]:
         s = gate_state[name]
@@ -137,18 +116,19 @@ def _build_display_line():
     return " | ".join(parts)
 
 
-def is_fully_blocked(signals_file=None):
+def is_fully_blocked(coin_name):
     """Cheap check: returns (blocked: bool, open_longs: int, open_shorts: int).
     Called before any Haiku steps — no capital calc, no stats, no API calls."""
-    open_longs  = get_open_longs(signals_file)
-    open_shorts = get_open_shorts(signals_file)
+    open_longs  = get_open_longs(coin_name)
+    open_shorts = get_open_shorts(coin_name)
     total = len(open_longs) + len(open_shorts)
     return total >= 2, len(open_longs), len(open_shorts)
 
 
-def pre_signal_gate(signals_file=None, coin_name="ETH", capital_start=CAPITAL):
+def pre_signal_gate(coin_name="ETH", capital_start=CAPITAL, **kwargs):
+    # Accept and ignore legacy signals_file kwarg for compatibility
     # Cost cap check
-    calls_today = count_todays_calls(signals_file)
+    calls_today = count_todays_calls(coin_name)
     if calls_today >= MAX_DAILY_CALLS:
         return {
             "proceed":    False,
@@ -156,10 +136,10 @@ def pre_signal_gate(signals_file=None, coin_name="ETH", capital_start=CAPITAL):
             "open_trade": None,
         }
 
-    open_longs  = get_open_longs(signals_file)
-    open_shorts = get_open_shorts(signals_file)
+    open_longs  = get_open_longs(coin_name)
+    open_shorts = get_open_shorts(coin_name)
     open_trades = open_longs + open_shorts
-    capital     = get_current_capital(signals_file, capital_start)
+    capital     = get_current_capital(coin_name, capital_start)
 
     # Update shared gate_state atomically and print combined status
     with _gate_lock:
@@ -179,7 +159,7 @@ def pre_signal_gate(signals_file=None, coin_name="ETH", capital_start=CAPITAL):
             "open_shorts": len(open_shorts),
         }
 
-    stats = get_todays_stats(signals_file)
+    stats = get_todays_stats(coin_name)
 
     # Percentage-based risk/reward from current capital via get_risk_reward
     risk_amount, reward_amount = get_risk_reward(coin_name)
@@ -198,5 +178,5 @@ def pre_signal_gate(signals_file=None, coin_name="ETH", capital_start=CAPITAL):
 
 
 if __name__ == "__main__":
-    result = pre_signal_gate()
+    result = pre_signal_gate("ETH")
     print(result)

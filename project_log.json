@@ -25,12 +25,12 @@
         "reward_risk_ratio": 1.5
       },
       "results": {
-        "trades": 204,
-        "wins": 72,
-        "losses": 132,
-        "win_rate": 35,
+        "trades": 211,
+        "wins": 78,
+        "losses": 133,
+        "win_rate": 37,
         "capital_start": 4000,
-        "capital_end": 3378.51
+        "capital_end": 3479.67
       },
       "notes": "Fresh multi-coin reset on 2026-04-23. ETH/SOL/AVAX/XRP paper trading restart from clean state."
     }
@@ -70,29 +70,29 @@
     "paper_trading_start": "2026-04-23"
   },
   "totals": {
-    "all_time_trades": 204,
-    "all_time_wins": 72,
-    "all_time_losses": 132,
-    "all_time_win_rate": 35,
+    "all_time_trades": 211,
+    "all_time_wins": 78,
+    "all_time_losses": 133,
+    "all_time_win_rate": 37,
     "peak_capital": 4020.9,
     "sessions_run": 1,
     "per_coin": {
       "ETH": {
-        "capital": 519.37,
-        "trades": 115,
-        "wins": 37,
-        "losses": 78,
+        "capital": 521.94,
+        "trades": 117,
+        "wins": 38,
+        "losses": 79,
         "win_rate": 32,
-        "long_trades": 68,
+        "long_trades": 70,
         "short_trades": 47
       },
       "SOL": {
-        "capital": 1206.58,
-        "trades": 31,
-        "wins": 19,
+        "capital": 1288.41,
+        "trades": 35,
+        "wins": 23,
         "losses": 12,
-        "win_rate": 61,
-        "long_trades": 27,
+        "win_rate": 66,
+        "long_trades": 31,
         "short_trades": 4
       },
       "AVAX": {
@@ -114,12 +114,12 @@
         "short_trades": 21
       },
       "LINK": {
-        "capital": 992.25,
-        "trades": 17,
-        "wins": 7,
+        "capital": 1009.01,
+        "trades": 18,
+        "wins": 8,
         "losses": 10,
-        "win_rate": 41,
-        "long_trades": 12,
+        "win_rate": 44,
+        "long_trades": 13,
         "short_trades": 5
       }
     }

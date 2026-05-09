@@ -1,7 +1,8 @@
+import json
 import os
 from datetime import datetime, timedelta
 
-from signal_store import read_latest_signals
+from trade_store import get_trade_store
 from time_utils import PACIFIC_TZ, now_pacific
 
 COIN_CAPITAL_START = 1000.0
@@ -9,14 +10,6 @@ PORTFOLIO_CAPITAL_START = COIN_CAPITAL_START * 4
 RISK_PERCENT = 0.02
 REWARD_PERCENT = 0.03
 COIN_ORDER = ["ETH", "SOL", "LINK", "XRP"]
-
-_BASE = os.path.dirname(os.path.abspath(__file__))
-COIN_CSV_FILES = {
-    "ETH":  os.path.join(_BASE, "eth_signals.csv"),
-    "SOL":  os.path.join(_BASE, "sol_signals.csv"),
-    "LINK": os.path.join(_BASE, "link_signals.csv"),
-    "XRP":  os.path.join(_BASE, "xrp_signals.csv"),
-}
 
 
 def safe_float(value, default=0.0):
@@ -53,25 +46,38 @@ def parse_signal_timestamp(value):
     return parsed.astimezone(PACIFIC_TZ)
 
 
-def load_rows_by_coin(coin_csv_files=None):
-    rows_by_coin = {}
-    csv_map = coin_csv_files or COIN_CSV_FILES
+def _unpack_trade(trade: dict) -> dict:
+    """Unpack metadata JSON into top-level keys for dashboard compat."""
+    row = dict(trade)
+    try:
+        meta = json.loads(row.get("metadata") or "{}")
+    except Exception:
+        meta = {}
+    for k in ("ta_summary", "sentiment_summary", "history_summary",
+              "decision_rationale", "overrides", "indicators",
+              "tp_adjustments", "tp_adjustment_log"):
+        row.setdefault(k, meta.get(k))
+    # Translate state to CSV-compatible outcome field
+    state = row.get("state", "")
+    if state == "PENDING":
+        row["outcome"] = "pending"
+    elif state == "CLOSED":
+        pass  # outcome already set (W/L)
+    elif state == "DNE":
+        row["outcome"] = "pending"
+    return row
 
+
+def load_rows_by_coin():
+    """Load all trades from SQLite, grouped by coin with metadata unpacked."""
+    store = get_trade_store()
+    rows_by_coin = {}
     for coin in COIN_ORDER:
-        csv_path = csv_map.get(coin)
-        if not csv_path:
-            rows_by_coin[coin] = []
-            continue
         try:
-            rows = read_latest_signals(csv_path)
+            trades = store.get_all_trades(coin=coin)
+            rows_by_coin[coin] = [dict(_unpack_trade(t), coin=coin) for t in trades]
         except Exception:
-            rows = []
-        annotated = []
-        for row in rows:
-            item = dict(row)
-            item["coin"] = coin
-            annotated.append(item)
-        rows_by_coin[coin] = annotated
+            rows_by_coin[coin] = []
     return rows_by_coin
 
 
@@ -240,7 +246,7 @@ def get_portfolio_stats(rows_by_coin=None):
         "wins": wins,
         "losses": losses,
         "pending_trades": len(pending),
-        "pending_buys": len(pending),  # backward-compatible alias for the existing dashboard payload
+        "pending_buys": len(pending),  # backward-compatible alias
         "total_signals": len(signals),
         "total_completed": completed,
         "loss_streak": loss_streak,
