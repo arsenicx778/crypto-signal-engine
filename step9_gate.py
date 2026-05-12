@@ -14,6 +14,13 @@ gate_state = {
     "XRP":  {"open_trades": 0, "open_longs": 0, "open_shorts": 0, "capital": 1000},
 }
 
+# Capital cache — invalidated when a trade closes (via invalidate_capital_cache)
+_capital_cache: dict[str, float] = {}
+
+def invalidate_capital_cache(coin: str):
+    """Call this whenever a trade closes so the next cycle replays fresh capital."""
+    _capital_cache.pop(coin, None)
+
 
 def get_risk_reward(coin_name):
     """Return (risk, reward) as 2% and 3% of the coin's current capital."""
@@ -33,77 +40,46 @@ def count_todays_calls(coin_name):
 
 
 def get_current_capital(coin_name, capital_start=CAPITAL):
-    """Replay all closed trades from SQLite to compute current capital."""
+    """Return cached capital, replaying from DB only when cache is cold."""
+    if coin_name in _capital_cache:
+        return _capital_cache[coin_name]
     try:
         store = get_trade_store()
-        return store.get_current_capital(coin_name, capital_start)
+        capital = store.get_current_capital(coin_name, capital_start)
     except:
-        return capital_start
+        capital = capital_start
+    _capital_cache[coin_name] = capital
+    return capital
+
+
+def _get_pending_trades(coin_name):
+    """Single DB fetch of all PENDING trades for this coin."""
+    try:
+        return get_trade_store().get_pending_trades(coin=coin_name)
+    except:
+        return []
 
 
 def get_open_trades(coin_name):
-    """Returns all open trades (Buy + Sell) that are still pending."""
-    try:
-        store = get_trade_store()
-        return [
-            t for t in store.get_pending_trades(coin=coin_name)
-            if t.get("signal") in ("Buy", "Sell")
-        ]
-    except:
-        return []
+    return [t for t in _get_pending_trades(coin_name) if t.get("signal") in ("Buy", "Sell")]
 
 
 def get_open_longs(coin_name):
-    try:
-        store = get_trade_store()
-        return [
-            t for t in store.get_pending_trades(coin=coin_name)
-            if t.get("signal") == "Buy"
-        ]
-    except:
-        return []
+    return [t for t in _get_pending_trades(coin_name) if t.get("signal") == "Buy"]
 
 
 def get_open_shorts(coin_name):
-    try:
-        store = get_trade_store()
-        return [
-            t for t in store.get_pending_trades(coin=coin_name)
-            if t.get("signal") == "Sell"
-        ]
-    except:
-        return []
+    return [t for t in _get_pending_trades(coin_name) if t.get("signal") == "Sell"]
 
 
 def get_open_trade(coin_name):
-    """Returns the most recent open trade, or None. Kept for backward compatibility."""
     trades = get_open_trades(coin_name)
     return trades[-1] if trades else None
 
 
 def get_todays_stats(coin_name):
     try:
-        today = str(date.today())
-        store = get_trade_store()
-        wins = losses = pending_long = pending_short = 0
-        for trade in store.get_all_trades(coin=coin_name):
-            ts = trade.get("timestamp", "")
-            if not ts.startswith(today):
-                continue
-            state = trade.get("state", "")
-            sig   = trade.get("signal")
-            outcome = trade.get("outcome")
-            if state == "CLOSED" and outcome == "W":
-                wins += 1
-            elif state == "CLOSED" and outcome == "L":
-                losses += 1
-            elif state == "PENDING" and sig == "Buy":
-                pending_long += 1
-            elif state == "PENDING" and sig == "Sell":
-                pending_short += 1
-        return {"wins": wins, "losses": losses,
-                "pending": pending_long + pending_short,
-                "pending_long": pending_long, "pending_short": pending_short}
+        return get_trade_store().get_todays_stats_db(coin_name, str(date.today()))
     except:
         return {"wins": 0, "losses": 0, "pending": 0, "pending_long": 0, "pending_short": 0}
 
@@ -118,9 +94,10 @@ def _build_display_line():
 
 def is_fully_blocked(coin_name):
     """Cheap check: returns (blocked: bool, open_longs: int, open_shorts: int).
-    Called before any Haiku steps — no capital calc, no stats, no API calls."""
-    open_longs  = get_open_longs(coin_name)
-    open_shorts = get_open_shorts(coin_name)
+    Called before any Haiku steps — single pending query, no capital replay."""
+    pending = _get_pending_trades(coin_name)
+    open_longs  = [t for t in pending if t.get("signal") == "Buy"]
+    open_shorts = [t for t in pending if t.get("signal") == "Sell"]
     total = len(open_longs) + len(open_shorts)
     return total >= 2, len(open_longs), len(open_shorts)
 
@@ -136,8 +113,10 @@ def pre_signal_gate(coin_name="ETH", capital_start=CAPITAL, **kwargs):
             "open_trade": None,
         }
 
-    open_longs  = get_open_longs(coin_name)
-    open_shorts = get_open_shorts(coin_name)
+    # Single pending fetch — split into longs/shorts from one query
+    pending     = _get_pending_trades(coin_name)
+    open_longs  = [t for t in pending if t.get("signal") == "Buy"]
+    open_shorts = [t for t in pending if t.get("signal") == "Sell"]
     open_trades = open_longs + open_shorts
     capital     = get_current_capital(coin_name, capital_start)
 

@@ -278,6 +278,29 @@ class TradeStore:
             ).fetchone()
             return row[0] if row else 0
 
+    def get_todays_stats_db(self, coin: str, today_str: str) -> dict:
+        """Single query for today's W/L/pending counts."""
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                """SELECT signal, state, outcome FROM trades
+                   WHERE coin=? AND timestamp LIKE ?""",
+                (coin, f"{today_str}%"),
+            ).fetchall()
+        wins = losses = pending_long = pending_short = 0
+        for row in rows:
+            state, sig, outcome = row["state"], row["signal"], row["outcome"]
+            if state == "CLOSED" and outcome == "W":
+                wins += 1
+            elif state == "CLOSED" and outcome == "L":
+                losses += 1
+            elif state == "PENDING" and sig == "Buy":
+                pending_long += 1
+            elif state == "PENDING" and sig == "Sell":
+                pending_short += 1
+        return {"wins": wins, "losses": losses,
+                "pending": pending_long + pending_short,
+                "pending_long": pending_long, "pending_short": pending_short}
+
     def update_trade_tp(
         self,
         trade_id: int,

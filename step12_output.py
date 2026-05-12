@@ -4,6 +4,7 @@ import threading
 import requests
 from dotenv import load_dotenv
 from trade_store import get_trade_store
+from step9_gate import invalidate_capital_cache
 from time_utils import now_pacific_str
 from project_logger import record_trade_outcome
 
@@ -338,6 +339,7 @@ def _update_outcome(timestamp, outcome, close_price, coin_name="ETH"):
     if trade_id is not None:
         success = store.close_trade(trade_id, close_price, close_time, outcome)
         if success:
+            invalidate_capital_cache(coin_name)
             print(f"[STORE] Trade {trade_id} closed in SQLite as {outcome}")
         else:
             print(f"[STORE] Warning: could not close trade {trade_id} (already closed?)")

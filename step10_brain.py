@@ -4,7 +4,10 @@ import re
 import anthropic
 from dotenv import load_dotenv
 from step_learn import format_learning_for_brain
-from config import ENABLE_SHORTS, PER_COIN_LIVE_CONFIG, ATR_MULTIPLIER_STOP, ATR_MULTIPLIER_TP
+from config import (
+    ENABLE_SHORTS, PER_COIN_LIVE_CONFIG, ATR_MULTIPLIER_STOP, ATR_MULTIPLIER_TP,
+    SCALP_RSI_LONG_MAX, SCALP_RSI_SHORT_MIN, MIN_DI_GAP, MIN_BB_WIDTH,
+)
 
 load_dotenv()
 client = anthropic.Anthropic()
@@ -140,12 +143,100 @@ def _pre_brain_gate(filtered_indicators: dict, coin_name: str) -> str | None:
         except Exception:
             pass  # learning file unreadable - don't skip, let Sonnet decide
 
+    # ── Rule 3: RSI bounds ───────────────────────────────────────────────────
+    if rsi is not None:
+        rsi_f = float(rsi)
+        if rsi_f > SCALP_RSI_LONG_MAX and not ENABLE_SHORTS:
+            return (
+                f"[GATE:{coin_name}] pre-brain RSI {rsi_f} above {SCALP_RSI_LONG_MAX} "
+                f"ceiling with shorts disabled — DNE"
+            )
+        # If RSI is above long ceiling AND below short floor simultaneously — impossible in practice
+        # but guard it: both directions blocked regardless of shorts setting
+        if rsi_f > SCALP_RSI_LONG_MAX and rsi_f < SCALP_RSI_SHORT_MIN:
+            return (
+                f"[GATE:{coin_name}] pre-brain RSI {rsi_f} outside all valid bounds — DNE"
+            )
+
+    # ── Rule 4: DI gap ───────────────────────────────────────────────────────
+    if di_plus is not None and di_minus is not None:
+        gap = abs(float(di_plus) - float(di_minus))
+        if gap < MIN_DI_GAP:
+            return (
+                f"[GATE:{coin_name}] pre-brain DI gap {gap:.1f} below minimum {MIN_DI_GAP} — DNE"
+            )
+
+    # ── Rule 5: ADX window (per-coin) ────────────────────────────────────────
+    adx = ind.get("adx") or ind.get("ADX")
+    if adx is not None:
+        adx_f    = float(adx)
+        coin_cfg = PER_COIN_LIVE_CONFIG.get(coin_name, {})
+        adx_min  = coin_cfg.get("ADX_MIN", 18)
+        adx_max  = coin_cfg.get("ADX_MAX", 50)
+        if adx_f < adx_min:
+            return (
+                f"[GATE:{coin_name}] pre-brain ADX {adx_f} below {adx_min} minimum — DNE"
+            )
+        if adx_f > adx_max:
+            return (
+                f"[GATE:{coin_name}] pre-brain ADX {adx_f} above {adx_max} maximum — DNE"
+            )
+
+    # ── Rule 6: BB width ─────────────────────────────────────────────────────
+    if bb_width is not None:
+        bbw = float(bb_width)
+        if bbw < MIN_BB_WIDTH:
+            return (
+                f"[GATE:{coin_name}] pre-brain BB width {bbw:.4f} below {MIN_BB_WIDTH} minimum — DNE"
+            )
+
+    # ── Rule 7: Candle confirmation — only block when close == prev_close ────
+    coin_cfg = PER_COIN_LIVE_CONFIG.get(coin_name, {})
+    if coin_cfg.get("REQUIRE_CANDLE_CONFIRMATION", False):
+        close      = ind.get("close")      or ind.get("CLOSE")
+        prev_close = ind.get("prev_close") or ind.get("PREV_CLOSE")
+        if close is not None and prev_close is not None:
+            if float(close) == float(prev_close):
+                return (
+                    f"[GATE:{coin_name}] pre-brain candle flat — neither direction confirmed — DNE"
+                )
+
+    # ── Rule 8: HTF trend vs shorts setting ──────────────────────────────────
+    htf_trend = (ind.get("htf_trend") or ind.get("HTF_TREND") or "").strip().upper()
+    if htf_trend == "BEARISH" and not ENABLE_SHORTS:
+        return (
+            f"[GATE:{coin_name}] pre-brain HTF BEARISH with shorts disabled — no valid direction — DNE"
+        )
+
     return None  # no skip condition met
+
+
+def format_momentum_context(ctx: dict) -> str:
+    lines = []
+    lines.append(f"RSI direction: {ctx['rsi_6']} (6 candles) / {ctx['rsi_15']} (15 candles)")
+    lines.append(f"ADX direction: {ctx['adx_6']} (6 candles) — momentum {ctx['macd_hist_accel']}")
+    lines.append(f"DI status: {ctx['di_trend']}")
+    if ctx.get("di_crossover"):
+        lines.append(f"Crossover alert: {ctx['di_crossover']}")
+    lines.append(f"Session position: {ctx['price_vs_session']} ({ctx['session_position_pct']}% of session range)")
+    lines.append(f"Session range: ${ctx['session_low']} to ${ctx['session_high']}")
+    lines.append(f"Volume: {ctx['volume_context']}")
+    return "\n".join(lines)
 
 
 def generate_signal(filtered_indicators, sentiment, history_summary, capital, risk_amount, reward_amount=None, coin_name="ETH", coin_symbol="XETHZUSD"):
     try:
-        indicators_text = "\n".join(f"  {k}: {v}" for k, v in filtered_indicators.items())
+        # Extract and format momentum context before building indicators_text
+        _mom_ctx = filtered_indicators.get("momentum_context")
+        _mom_section = ""
+        if _mom_ctx and isinstance(_mom_ctx, dict):
+            _mom_section = f"\nShort-term momentum context (last 4 hours):\n{format_momentum_context(_mom_ctx)}\n"
+            print(f"[BRAIN:{coin_name}] momentum context injected: RSI {_mom_ctx.get('rsi_6')}/{_mom_ctx.get('rsi_15')} | "
+                  f"MACD {_mom_ctx.get('macd_hist_accel')} | pos {_mom_ctx.get('price_vs_session')}")
+
+        indicators_text = "\n".join(
+            f"  {k}: {v}" for k, v in filtered_indicators.items() if k != "momentum_context"
+        )
         coin_price_note = _COIN_PRICE_NOTES.get(coin_name, "")
         if reward_amount is None:
             reward_amount = round(risk_amount * 1.5, 2)
@@ -241,6 +332,7 @@ INDICATOR GUIDANCE:
 - BB_WIDTH expanding = volatility increasing, good for momentum entries
 - BB_WIDTH < 0.003 = squeeze / low volatility = avoid
 - MACD histogram acceleration (increasing absolute value) is a stronger signal than MACD level alone
+- Momentum direction matters more than absolute indicator values for scalping. Prefer entries where RSI is rising over the last 6 candles, MACD histogram is accelerating, and price is in the lower or middle third of the session range for longs, or upper or middle third for shorts. A DI crossover within the last 5 candles is a strong signal of early trend establishment.
 
 PRICE SCALE FOR {coin_name}:
 {coin_price_note}
@@ -266,7 +358,7 @@ Output ONLY valid JSON with no other text:
 
 Selected indicators:
 {indicators_text}
-
+{_mom_section}
 News sentiment:  {sentiment.get('news_score', 0.0):+.2f} (range -1.0 to +1.0)
 Headlines seen:  {sentiment.get('headline_count', 0)}
 
