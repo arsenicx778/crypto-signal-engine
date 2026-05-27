@@ -28,5 +28,11 @@
     "trade_count": 13,
     "overall_win_rate": 38,
     "summary": "The portfolio suffers from overtrading LONG entries in overbought or high-sentiment regimes (0% wins above RSI 60 or sentiment >0.42). SHORT trades with trend confirmation (ADX >25) and bearish structure (DI- dominance, low RSI) show clear 67% edge. DNE signal miss rate of 46% suggests the signal is appropriately cautious rather than overly conservative\u2014it correctly avoids many whipsaw scenarios but leaves real opportunities on the table. Focus future entries on SHORT setups and low-ADX LONG mean reversions, and eliminate LONG when market shows momentum."
+  },
+  {
+    "timestamp": "2026-05-21 18:37 PT",
+    "trade_count": 40,
+    "overall_win_rate": 42,
+    "summary": "LONG trades dominate profitability when RSI stays in 58-63 range with strong DI+ advantage, but extreme sentiment readings (>+0.50) and high ADX (>30) trigger reversals. HIGH ADX paradoxically correlates with losses despite indicating trend strength, suggesting SOL mean-reverts in strong trends. SHORT trades lack reliable edge across all conditions tested; focus capital on optimized LONG setups with neutral-to-slightly-positive sentiment. DNE signal miss rate of 36.8% indicates signals may be appropriately cautious rather than overly conservative."
   }
 ]

@@ -22,5 +22,11 @@
     "trade_count": 13,
     "overall_win_rate": 15,
     "summary": "The trading system is heavily skewed toward LONG losses (0% win rate on 8 trades) while SHORT trades show promise (50% win rate, 2 wins). Critical issue: ADX < 27 SHORT trades are catastrophic (0-5 record). The DNE signal analysis at 6.2% miss rate appears appropriately cautious given the system's overall fragility; however, this is overshadowed by the core problem that LONG direction should be suspended entirely until signal logic is overhauled. Focus resources on optimizing SHORT setups in the ADX 25-40 sweet spot."
+  },
+  {
+    "timestamp": "2026-05-21 18:38 PT",
+    "trade_count": 40,
+    "overall_win_rate": 53,
+    "summary": "The system shows a 53% overall win rate with clear directional strength: SHORT trades significantly outperform (77% win rate in optimal conditions) while LONG trades are vulnerable to negative sentiment (0% win rate). The DNE signal miss rate of 38.8% appears appropriately cautious rather than overly conservative\u2014the system is correctly identifying high-probability SHORT setups and avoiding weak LONG entries, which aligns with observed outcomes. Focus the brain on SHORT trades with RSI 35-45, strong DI- dominance, and moderate positive sentiment for maximum edge."
   }
 ]

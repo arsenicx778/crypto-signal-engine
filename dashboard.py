@@ -8,6 +8,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from datetime import datetime
+from time_utils import PACIFIC_TZ
 import requests
 import dashboard_metrics as dm
 import importlib
@@ -584,6 +585,17 @@ a{color:inherit;text-decoration:none}
 .bt-empty-sub{font-size:13px;color:var(--t2);line-height:1.6;max-width:480px;margin:0 auto}
 .bt-empty-cmd{display:inline-block;margin-top:12px;background:var(--s2);border:1px solid var(--sep);border-radius:8px;padding:8px 16px;font-family:var(--mono);font-size:13px;color:var(--green)}
 .lr-source-tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.07em;padding:2px 7px;border-radius:4px;background:rgba(41,182,246,.15);color:#29b6f6;margin-left:6px}
+
+/* ── Experiment Mode Banner ── */
+.experiment-banner{display:none;background:rgba(41,182,246,.10);border-bottom:2px solid rgba(41,182,246,.4);padding:9px 20px;text-align:center;color:#29b6f6}
+.experiment-banner.show{display:block}
+.experiment-banner-title{font-size:13px;font-weight:700;letter-spacing:.05em}
+.experiment-banner-sub{font-size:11px;opacity:.85;margin-top:1px}
+
+/* ── Suspended Coin Card ── */
+.coin-card.suspended{opacity:.45;cursor:not-allowed;background:repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(255,255,255,.02) 8px,rgba(255,255,255,.02) 16px)}
+.coin-card.suspended:hover{background:repeating-linear-gradient(45deg,transparent,transparent 8px,rgba(255,255,255,.02) 8px,rgba(255,255,255,.02) 16px)}
+.suspended-badge{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.08em;padding:2px 6px;border-radius:3px;background:rgba(255,159,10,.18);color:var(--amber);margin-left:6px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -591,6 +603,11 @@ a{color:inherit;text-decoration:none}
 <div class="paused-banner" id="paused-banner">
   <div class="paused-banner-title">&#9888; ENGINE PAUSED — Historical validation in progress</div>
   <div class="paused-banner-sub">Live trading disabled &nbsp;|&nbsp; Monitor running &nbsp;|&nbsp; Existing positions being watched</div>
+</div>
+
+<div class="experiment-banner" id="experiment-banner">
+  <div class="experiment-banner-title" id="exp-banner-title">&#129514; EXPERIMENT MODE — A/B/C variants running on ETH only</div>
+  <div class="experiment-banner-sub" id="exp-banner-sub">Other coins suspended &nbsp;|&nbsp; See <a href="#" onclick="switchTab('experiment');return false;" style="color:#29b6f6;text-decoration:underline">Experiment tab</a> for variant performance</div>
 </div>
 
 <header class="hdr">
@@ -613,6 +630,7 @@ a{color:inherit;text-decoration:none}
     <button class="page-tab" id="tab-project" onclick="switchTab('project')">Project</button>
     <button class="page-tab" id="tab-golive" onclick="switchTab('golive')">Readiness</button>
     <button class="page-tab" id="tab-learnings" onclick="switchTab('learnings')">Learnings</button>
+    <button class="page-tab" id="tab-experiment" onclick="switchTab('experiment')">Experiment</button>
     <button class="page-tab" id="tab-backtest" onclick="switchTab('backtest')">Backtest</button>
   </div>
 
@@ -730,6 +748,12 @@ a{color:inherit;text-decoration:none}
   <div id="backtest-view" style="display:none">
     <div id="bt-loading" class="loading"><div class="spin"></div><br>Loading backtest data&hellip;</div>
     <div id="bt-content" style="display:none"></div>
+  </div>
+
+  <!-- Experiment Tab -->
+  <div id="experiment-view" style="display:none">
+    <div id="exp-loading" class="loading"><div class="spin"></div><br>Loading experiment data&hellip;</div>
+    <div id="exp-content" style="display:none"></div>
   </div>
 
 </div><!-- /page -->
@@ -1266,22 +1290,24 @@ function buildCoinViewModels(windowSignals, meta) {
 
     return {
       coin,
-      current_price:   server.current_price,
-      risk_per_trade:  server.risk_per_trade,
+      current_price:    server.current_price,
+      risk_per_trade:   server.risk_per_trade,
       reward_per_trade: server.reward_per_trade,
       capital,
       wins,
       losses,
       completed,
       win_rate,
+      win_rate_48h:     server.win_rate_48h != null ? server.win_rate_48h : null,
+      completed_48h:    server.completed_48h != null ? server.completed_48h : null,
       pending,
       longs_open,
       shorts_open,
       open_trades,
-      pnl:             capital - 1000,
-      window_pnl:      m.pnl,
-      display_pnl:     displayPnl,
-      signals_total:   coinSigs.length,
+      pnl:              capital - 1000,
+      window_pnl:       m.pnl,
+      display_pnl:      displayPnl,
+      signals_total:    coinSigs.length,
     };
   });
 }
@@ -1494,11 +1520,13 @@ function renderMetrics(cs, sigs, meta){
   const pnlSign         = displayPnl > 0 ? '+' : '';
   const pnlCol          = displayPnl > 0 ? '#00c805' : displayPnl < 0 ? '#ff3b30' : '#8e8e93';
 
-  // W/L record always from server all-time values
+  // W/L computed from cs which is window-scoped (or all-time when meta.isAllTime)
   const atWins   = cs.reduce((a,c)=>a+c.wins, 0);
   const atLosses = cs.reduce((a,c)=>a+c.losses, 0);
   const atWR     = (atWins+atLosses>0 ? atWins/(atWins+atLosses)*100 : 0);
   const atTrades = atWins + atLosses;
+  // Count signals that are closed trades (W or L) within the window for the trade count card
+  const windowTrades = sigs.filter(s=>(s.signal==='Buy'||s.signal==='Sell') && (normalizeOutcome(s.outcome)==='W'||normalizeOutcome(s.outcome)==='L')).length;
   const wrCol    = (atWins+atLosses)===0?'#8e8e93':atWR>=55?'#00c805':atWR>=45?'#ff9f0a':'#ff3b30';
   const capitalValue = meta.isAllTime ? fmtUSD(totalCapital) : `${pnlSign}${fmtUSD(Math.abs(displayPnl))}`;
   const capitalSub   = meta.isAllTime ? `${pnlSign}${fmtUSD(Math.abs(allTimePnl))} vs ${fmtUSD(capitalBaseline)} baseline` : `${meta.label} ${cs.length===1 ? activeCoinLabel() : 'across all coins'}`;
@@ -1511,22 +1539,22 @@ function renderMetrics(cs, sigs, meta){
       <div class="met-hint">${meta.isAllTime ? (cs.length===1 ? 'Running capital for the focused coin.' : 'Portfolio total across ETH, SOL, LINK, and XRP.') : 'Profit and loss for the active window only.'}</div>
     </div>
     <div class="met-card">
-      <div class="met-label">Win Rate</div>
+      <div class="met-label">${meta.isAllTime ? 'Win Rate' : `Win Rate · ${meta.label}`}</div>
       <div class="met-val" style="color:${wrCol}">${(atWins+atLosses)>0?fmtNum(atWR,1)+'%':'—'}</div>
       <div class="met-sub">${atWins}w ${atLosses}l</div>
-      <div class="met-hint">${meta.isAllTime ? 'All-time win rate from full CSV history.' : `Win rate within ${meta.label}.`}</div>
+      <div class="met-hint">${meta.isAllTime ? 'All-time win rate across all recorded trades.' : `Closed trades entered within ${meta.label}.`}</div>
     </div>
     <div class="met-card">
       <div class="met-label">Open Trades</div>
       <div class="met-val" style="color:${totalOpen>0?'var(--amber)':'#8e8e93'}">${totalOpen}</div>
-      <div class="met-sub">all time · ${cs.length===1 ? activeCoinLabel() : 'across all coins'}</div>
-      <div class="met-hint">These trades are still live and not counted in win rate.</div>
+      <div class="met-sub">live · ${cs.length===1 ? activeCoinLabel() : 'across all coins'}</div>
+      <div class="met-hint">Active positions — always shown regardless of date window.</div>
     </div>
     <div class="met-card">
       <div class="met-label">${meta.tradeLabel}</div>
-      <div class="met-val">${atTrades}</div>
-      <div class="met-sub">${sigs.length} signals in ${meta.label}</div>
-      <div class="met-hint">Signals include trades and skipped entries when visible.</div>
+      <div class="met-val">${meta.isAllTime ? atTrades : windowTrades}</div>
+      <div class="met-sub">${sigs.filter(s=>s.signal!=='Hold').length} signals · ${meta.label}</div>
+      <div class="met-hint">${meta.isAllTime ? 'All closed trades (wins + losses).' : `Trades entered and closed within ${meta.label}.`}</div>
     </div>
   `;
   const liveCapital = (coinStats || []).reduce((a,c)=>a+(c.capital||0), 0);
@@ -1540,7 +1568,7 @@ function renderCoinRow(cs, meta){
     const pnl         = c.capital - 1000;
     // Window-scoped P&L for windowed display mode
     const displayPnl  = c.display_pnl !== undefined ? c.display_pnl : (meta.isAllTime ? pnl : (c.window_pnl || 0));
-    const capCol      = pnl > 0 ? '#00c805' : pnl < 0 ? '#ff3b30' : '#8e8e93';
+    const capCol      = displayPnl > 0 ? '#00c805' : displayPnl < 0 ? '#ff3b30' : '#8e8e93';
     const wrCol       = c.win_rate==null?'#8e8e93':c.win_rate>=55?'#00c805':c.win_rate>=45?'#ff9f0a':'#ff3b30';
     const priceStr    = c.current_price ? fmtUSD(c.current_price, c.current_price < 10 ? 4 : 2) : '—';
     const riskStr     = c.risk_per_trade   ? fmtUSD(c.risk_per_trade,   2) : fmtUSD(c.capital*0.02, 2);
@@ -1548,11 +1576,15 @@ function renderCoinRow(cs, meta){
     const primaryLabel = meta.isAllTime ? 'Capital' : `${meta.label} P/L`;
     const primaryValue = meta.isAllTime ? fmtUSD(c.capital) : `${displayPnl>0?'+':displayPnl<0?'-':''}${fmtUSD(Math.abs(displayPnl))}`;
     const isActive = coinFilter === c.coin;
-    return `<div class="coin-card${isActive?' active':''}" onclick="setCoinFilter('${c.coin}')">
+    const isSuspended = window.SUSPENDED_COINS && window.SUSPENDED_COINS.has(c.coin);
+    const clickHandler = isSuspended ? '' : `onclick="setCoinFilter('${c.coin}')"`;
+    const kickerText = isSuspended ? 'Not trading' : (isActive ? 'Focused coin' : 'Click to focus');
+    const suspendedBadge = isSuspended ? '<span class="suspended-badge">SUSPENDED</span>' : '';
+    return `<div class="coin-card${isActive?' active':''}${isSuspended?' suspended':''}" ${clickHandler}>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
         <div>
-          <div class="coin-card-kicker">${isActive ? 'Focused coin' : 'Click to focus'}</div>
-          <span class="coin-badge coin-${c.coin.toLowerCase()}">${c.coin}</span>
+          <div class="coin-card-kicker">${kickerText}</div>
+          <span class="coin-badge coin-${c.coin.toLowerCase()}">${c.coin}</span>${suspendedBadge}
         </div>
         <span style="font-size:13px;font-weight:600;font-family:var(--mono);font-variant-numeric:tabular-nums">${priceStr}</span>
       </div>
@@ -1568,12 +1600,12 @@ function renderCoinRow(cs, meta){
       </div>
       <div style="display:flex;justify-content:space-between;margin-bottom:4px">
         <div>
-          <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Win Rate</div>
+          <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">${meta.isAllTime ? 'Win Rate' : `${meta.label} WR`}</div>
           <div style="font-size:12px;font-family:var(--mono);color:${wrCol}">${c.win_rate!=null?fmtNum(c.win_rate,1)+'%':'—'}</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">Open</div>
-          <div style="font-size:12px;color:${c.pending>0?'var(--amber)':'var(--t2)'}">L:${c.longs_open||0} S:${c.shorts_open||0}</div>
+          <div style="font-size:10px;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px">48h WR</div>
+          <div style="font-size:12px;font-family:var(--mono);color:${c.win_rate_48h==null?'#8e8e93':c.win_rate_48h>=55?'#00c805':c.win_rate_48h>=45?'#ff9f0a':'#ff3b30'}">${c.win_rate_48h!=null?fmtNum(c.win_rate_48h,1)+'%':'—'}</div>
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)">
@@ -1586,7 +1618,7 @@ function renderCoinRow(cs, meta){
           <div style="font-size:11px;font-family:var(--mono);color:var(--green)">${rewStr} (3%)</div>
         </div>
       </div>
-      <div class="coin-card-tip">${isActive ? 'This coin is driving the chart, alerts, and feed below.' : 'Tap to narrow the whole dashboard to this coin.'}</div>
+      <div class="coin-card-tip">${isSuspended ? 'Suspended during experiment — historical data shown.' : (isActive ? 'This coin is driving the chart, alerts, and feed below.' : 'Tap to narrow the whole dashboard to this coin.')}</div>
     </div>`;
   }).join('');
 }
@@ -1692,9 +1724,9 @@ function applyFeedFilter(sigs,f){
   switch(f){
     case'buy':    return sigs.filter(s=>s.signal==='Buy');
     case'sell':   return sigs.filter(s=>s.signal==='Sell');
-    case'win':    return sigs.filter(s=>s.outcome==='W');
-    case'loss':   return sigs.filter(s=>s.outcome==='L');
-    case'pending':return sigs.filter(s=>(s.signal==='Buy'||s.signal==='Sell')&&s.outcome==='pending');
+    case'win':    return sigs.filter(s=>normalizeOutcome(s.outcome)==='W');
+    case'loss':   return sigs.filter(s=>normalizeOutcome(s.outcome)==='L');
+    case'pending':return sigs.filter(s=>(s.signal==='Buy'||s.signal==='Sell')&&normalizeOutcome(s.outcome)==='pending');
     case'dne':    return sigs.filter(s=>s.signal==='Do Not Enter');
     default:      return sigs.filter(s=>s.signal!=='Hold'); // 'all' excludes noise
   }
@@ -1762,7 +1794,7 @@ function renderFeed(){
   }
 
   let html=`<table class="sig-table"><thead><tr>
-    <th>Time (PST)</th><th>Coin</th><th>Signal</th><th>Confidence</th><th>Outcome</th><th>Duration</th>
+    <th>Time (PST)</th><th>Coin</th><th>Group</th><th>Signal</th><th>Confidence</th><th>Outcome</th><th>Duration</th>
   </tr></thead><tbody>`;
 
   html+=slice.map((s,i)=>{
@@ -1811,9 +1843,16 @@ function renderFeed(){
 
     // openModal index into the full _buildFeedRows array
     const modalIdx = i; // slice is the first feedLimit items of rows; rows[i] === slice[i]
+    const variantLabels = {A:'Control',B:'GPT-5.4 Brain',C:'Sonnet no learning'};
+    const vKey = s.variant ? String(s.variant).toUpperCase() : null;
+    const variantColors = {A:'var(--t2)',B:'#7c6af7',C:'#f7a94a'};
+    const groupCell = vKey && variantLabels[vKey]
+      ? `<td><span style="font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;background:${variantColors[vKey]}22;color:${variantColors[vKey]}">${variantLabels[vKey]}</span></td>`
+      : `<td style="color:var(--t3);font-size:11px">Live</td>`;
     return`<tr class="${rowCls}" onclick="openModal(${modalIdx})" style="cursor:pointer">
       <td style="font-family:var(--mono);color:var(--t2)">${fmtTime(s.timestamp)}</td>
       <td>${coinBadge}</td>
+      ${groupCell}
       <td style="${sigStyle}">${sigLabel}</td>
       <td style="font-family:var(--mono)">${confStr}</td>
       <td>${outcomePill}</td>
@@ -1910,6 +1949,21 @@ async function loadAll(){
   const dot = $('live-dot');
   if(dot){ dot.style.background = paused ? 'var(--amber)' : 'var(--green)'; }
 
+  // Suspended coins + experiment mode banner
+  window.SUSPENDED_COINS = new Set((cfgRes && cfgRes.suspended_coins) || []);
+  const expActive = !!(cfgRes && cfgRes.experiment_active);
+  const expBanner = $('experiment-banner');
+  if(expBanner){
+    expBanner.classList.toggle('show', expActive);
+    if(expActive && cfgRes.experiment_coin){
+      const t = $('exp-banner-title');
+      if(t) t.innerHTML = `&#129514; EXPERIMENT MODE — A/B/C variants running on ${cfgRes.experiment_coin} only`;
+      const susp = (cfgRes.suspended_coins||[]).join(', ');
+      const s = $('exp-banner-sub');
+      if(s && susp) s.innerHTML = `Suspended: ${susp} &nbsp;|&nbsp; See <a href="#" onclick="switchTab('experiment');return false;" style="color:#29b6f6;text-decoration:underline">Experiment tab</a> for variant performance`;
+    }
+  }
+
   if(!sigRes){ $('loading').innerHTML='<div style="color:#ff3b30">Error loading signals</div>'; return; }
 
   signals       = sigRes.signals || [];
@@ -1970,15 +2024,18 @@ function switchTab(tab) {
   $('tab-golive').classList.toggle('active', tab === 'golive');
   $('tab-learnings').classList.toggle('active', tab === 'learnings');
   $('tab-backtest').classList.toggle('active', tab === 'backtest');
+  $('tab-experiment').classList.toggle('active', tab === 'experiment');
   $('app').style.display = tab === 'live' ? 'block' : 'none';
   $('project-view').style.display = tab === 'project' ? 'block' : 'none';
   $('golive-view').style.display = tab === 'golive' ? 'block' : 'none';
   $('learnings-view').style.display = tab === 'learnings' ? 'block' : 'none';
   $('backtest-view').style.display = tab === 'backtest' ? 'block' : 'none';
+  $('experiment-view').style.display = tab === 'experiment' ? 'block' : 'none';
   if (tab === 'project') loadProjectStatus();
   if (tab === 'golive') loadGoLive();
   if (tab === 'learnings') loadLearnings();
   if (tab === 'backtest') loadBacktest();
+  if (tab === 'experiment') loadExperiment();
 }
 
 // ── Project Status ─────────────────────────────────────────────────────────────
@@ -2013,6 +2070,9 @@ function renderProjectStatus(data) {
   const liveLosses = portfolio.losses || 0;
   const liveTrades = portfolio.total_completed || 0;
   const liveWR = portfolio.win_rate || 0;
+  const liveWR48h = portfolio.win_rate_48h != null ? portfolio.win_rate_48h : null;
+  const liveCompleted48h = portfolio.completed_48h || 0;
+  const wrCol48h = liveWR48h==null?'#8e8e93':liveWR48h>=55?'var(--green)':liveWR48h>=45?'var(--amber)':'var(--red)';
   const trackedPeakCapital = totals.peak_capital || sess.capital_end || portfolio.capital || 0;
   const currentSignalsPerDay = (live.signals_per_day && live.signals_per_day.average_per_day) || 0;
   const sessionsRun = totals.sessions_run || data.current_session || sessions.length || 1;
@@ -2062,6 +2122,11 @@ function renderProjectStatus(data) {
           <div class="ps-card-label">Win Rate</div>
           <div class="ps-card-val" style="color:${wrCol}">${fmtNum(liveWR,1)}%</div>
           <div class="ps-card-sub">${liveWins}W / ${liveLosses}L</div>
+        </div>
+        <div class="ps-card">
+          <div class="ps-card-label">48h Win Rate</div>
+          <div class="ps-card-val" style="color:${wrCol48h}">${liveWR48h!=null?fmtNum(liveWR48h,1)+'%':'—'}</div>
+          <div class="ps-card-sub">${liveCompleted48h} trades</div>
         </div>
         <div class="ps-card">
           <div class="ps-card-label">Total Trades</div>
@@ -2429,7 +2494,7 @@ function setLrCoin(coin) {
 function renderLearnings() {
   $('lr-loading').style.display = 'none';
   $('lr-content').style.display = 'block';
-  const COINS_ORDER = ['ETH','SOL','XRP','LINK'];
+  const COINS_ORDER = ['ETH','SOL','LINK','XRP'];
   $('lr-content').innerHTML = `
     <div class="tab-intro">
       <div class="tab-intro-title">How to read Learnings</div>
@@ -2685,6 +2750,128 @@ function renderBacktest(data) {
     ${patternSections}
   `;
 }
+
+// ── Experiment A/B/C/D Tab ────────────────────────────────────────────────────
+async function loadExperiment() {
+  $('exp-loading').style.display = 'flex';
+  $('exp-content').style.display = 'none';
+  try {
+    const r = await fetch('/api/variants', {signal: AbortSignal.timeout(6000)});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'unknown error');
+    renderExperiment(d);
+  } catch(e) {
+    $('exp-loading').innerHTML = `<div style="color:var(--red)">Error loading experiment data: ${e.message}</div>`;
+    return;
+  }
+  $('exp-loading').style.display = 'none';
+  $('exp-content').style.display = 'block';
+}
+
+function renderExperiment(d) {
+  const variants = d.variants || {};
+  const active   = d.experiment_active;
+  const minT     = d.min_trades || 30;
+  const varOrder = ['A','B','C'];
+  const aWR      = variants['A']?.win_rate ?? null;
+
+  const statusBanner = `
+    <div style="margin:20px 20px 0;padding:12px 16px;border-radius:10px;background:${active?'rgba(0,200,5,.08)':'rgba(255,59,48,.08)'};border:1px solid ${active?'rgba(0,200,5,.2)':'rgba(255,59,48,.2)'};display:flex;align-items:center;gap:10px">
+      <span style="font-size:18px">${active?'🟢':'🔴'}</span>
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--t1)">Experiment ${active?'Active':'Inactive'}</div>
+        <div style="font-size:12px;color:var(--t2)">ETH only · Variants A/B/C running in shadow mode · Comparison valid after ${minT}+ closed trades per variant</div>
+      </div>
+    </div>`;
+
+  // Summary comparison table
+  const tableRows = varOrder.map(vid => {
+    const v = variants[vid];
+    if (!v) return `<tr><td colspan="8" style="color:var(--t3);text-align:center">Variant ${vid} — no data yet</td></tr>`;
+    const completed = v.completed || 0;
+    const ready     = v.ready;
+    const wr        = v.win_rate;
+    const delta     = v.delta_vs_a;
+    const wrCol     = wr==null?'#8e8e93':wr>=55?'var(--green)':wr>=45?'var(--amber)':'var(--red)';
+    const deltaStr  = delta==null ? '—' : (delta>0?`+${delta}pp`:`${delta}pp`);
+    const deltaCol  = delta==null?'#8e8e93':delta>0?'var(--green)':delta<0?'var(--red)':'#8e8e93';
+    const readyBadge = ready
+      ? `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(0,200,5,.15);color:var(--green)">✓ Ready</span>`
+      : `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.06);color:var(--t3)">${completed}/${minT}</span>`;
+    const pnlCol = (v.net_pnl||0)>0?'var(--green)':(v.net_pnl||0)<0?'var(--red)':'#8e8e93';
+    return `<tr>
+      <td style="font-weight:700;font-size:15px">${vid}</td>
+      <td style="color:var(--t2);font-size:12px">${v.label||'—'}</td>
+      <td>${readyBadge}</td>
+      <td style="font-family:var(--mono)">${v.wins||0}W / ${v.losses||0}L</td>
+      <td style="font-family:var(--mono);color:${wrCol};font-weight:600">${wr!=null?wr+'%':'—'}</td>
+      <td style="font-family:var(--mono);color:${deltaCol};font-weight:600">${vid==='A'?'baseline':deltaStr}</td>
+      <td style="font-family:var(--mono);color:${pnlCol}">${v.net_pnl!=null?(v.net_pnl>0?'+':'')+fmtUSD(v.net_pnl):'—'}</td>
+      <td style="font-family:var(--mono);color:var(--t2)">${v.avg_confidence!=null?v.avg_confidence+'%':'—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Daily series sparklines per variant
+  const sparklines = varOrder.map(vid => {
+    const v = variants[vid];
+    if (!v || !v.daily || !v.daily.length) return '';
+    const days = v.daily;
+    const max  = 100;
+    const bars = days.map(d => {
+      const wr  = d.win_rate || 0;
+      const col = wr>=55?'var(--green)':wr>=45?'var(--amber)':'var(--red)';
+      const h   = Math.round((wr/max)*40);
+      return `<div title="${d.day}: ${wr}% (${d.wins}W/${d.losses}L)" style="width:18px;height:${h}px;background:${col};border-radius:2px;align-self:flex-end"></div>`;
+    }).join('');
+    return `
+      <div style="background:var(--s2);border:1px solid var(--sep);border-radius:10px;padding:14px;flex:1;min-width:180px">
+        <div style="font-size:11px;font-weight:600;color:var(--t2);margin-bottom:4px">Variant ${vid} · 7-day WR</div>
+        <div style="font-size:13px;font-weight:700;color:${(v.win_rate||0)>=55?'var(--green)':(v.win_rate||0)>=45?'var(--amber)':'var(--red)'};margin-bottom:10px">${v.win_rate!=null?v.win_rate+'%':'—'} · ${v.label}</div>
+        <div style="display:flex;gap:4px;align-items:flex-end;height:44px">${bars}</div>
+        <div style="font-size:10px;color:var(--t3);margin-top:6px">${days.map(d=>d.day.slice(5)).join(' · ')}</div>
+      </div>`;
+  }).join('');
+
+  $('exp-content').innerHTML = `
+    ${statusBanner}
+    <div class="tab-intro" style="margin-top:16px">
+      <div class="tab-intro-title">A/B/C Variant Test — ETH Only</div>
+      <div class="tab-intro-copy">
+        All variants run on ETH price data in shadow (paper) mode simultaneously.
+        <strong>A</strong> = Control (Sonnet, learning ON) ·
+        <strong>B</strong> = GPT-5.4 brain ·
+        <strong>C</strong> = Sonnet, learning OFF.
+        Results are meaningful after ${minT}+ closed trades per variant (~3 days).
+      </div>
+    </div>
+
+    <div style="margin:20px 20px 0">
+      <div style="font-size:12px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Comparison</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--sep)">
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">Variant</th>
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">Description</th>
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">Status</th>
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">W/L</th>
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">Win Rate</th>
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">vs A</th>
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">Net P&L</th>
+              <th style="text-align:left;padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--t2);font-weight:500">Avg Conf</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="margin:20px 20px 0">
+      <div style="font-size:12px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">7-Day Win Rate Trend</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">${sparklines || '<div style="color:var(--t3);font-size:13px">No closed trades yet — sparklines appear once trades resolve.</div>'}</div>
+    </div>
+  `;
+}
 </script>
 </body>
 </html>"""
@@ -2729,7 +2916,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     "signals":          sigs,
                     "stats":            st,
                     "starting_capital": COIN_CAPITAL_START * 4,
-                    "updated":          datetime.now().isoformat(),
+                    "updated":          datetime.now(tz=PACIFIC_TZ).isoformat(),
                     "project_totals":   project_totals,
                     "live_summary":     live_summary,
                 },
@@ -2870,12 +3057,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
             try:
                 import config as _cfg
                 importlib.reload(_cfg)
+                experiment_active = False
+                experiment_coin = None
+                try:
+                    from experiment.config import EXPERIMENT_ACTIVE, EXPERIMENT_COIN
+                    experiment_active = bool(EXPERIMENT_ACTIVE)
+                    experiment_coin = EXPERIMENT_COIN.get("name") if isinstance(EXPERIMENT_COIN, dict) else None
+                except Exception:
+                    pass
                 payload = json.dumps({
                     "ok": True,
                     "live_trading_enabled": getattr(_cfg, "LIVE_TRADING_ENABLED", True),
                     "live_trading_pause_reason": getattr(_cfg, "LIVE_TRADING_PAUSE_REASON", ""),
                     "live_learning_enabled": getattr(_cfg, "LIVE_LEARNING_ENABLED", True),
                     "historical_learning_enabled": getattr(_cfg, "HISTORICAL_LEARNING_ENABLED", False),
+                    "suspended_coins": list(getattr(_cfg, "SUSPENDED_COINS", []) or []),
+                    "experiment_active": experiment_active,
+                    "experiment_coin": experiment_coin,
                 }).encode("utf-8")
             except Exception as e:
                 payload = json.dumps({"ok": False, "error": str(e)}).encode("utf-8")
@@ -2971,6 +3169,43 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     },
                     default=str,
                 ).encode("utf-8")
+            except Exception as e:
+                payload = json.dumps({"ok": False, "error": str(e)}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        elif parsed.path == "/api/variants":
+            try:
+                from experiment.results import get_variant_stats, get_variant_daily_series
+                from experiment.config import VARIANTS, EXPERIMENT_ACTIVE, MIN_TRADES_FOR_COMPARISON
+                stats = get_variant_stats()
+                # Build enriched response with labels and daily series
+                enriched = {}
+                for v_id, v_cfg in VARIANTS.items():
+                    v_stats = stats.get(v_id, {})
+                    completed = (v_stats.get("wins") or 0) + (v_stats.get("losses") or 0)
+                    enriched[v_id] = {
+                        **v_stats,
+                        "variant":    v_id,
+                        "label":      v_cfg["label"],
+                        "completed":  completed,
+                        "ready":      completed >= MIN_TRADES_FOR_COMPARISON,
+                        "daily":      get_variant_daily_series(v_id, days=7),
+                    }
+                # Delta vs control A
+                a_wr = enriched.get("A", {}).get("win_rate")
+                for v_id, v_data in enriched.items():
+                    wr = v_data.get("win_rate")
+                    v_data["delta_vs_a"] = round(wr - a_wr, 1) if (wr is not None and a_wr is not None and v_id != "A") else None
+                payload = json.dumps({
+                    "ok": True,
+                    "experiment_active": EXPERIMENT_ACTIVE,
+                    "min_trades": MIN_TRADES_FOR_COMPARISON,
+                    "variants": enriched,
+                }, default=str).encode("utf-8")
             except Exception as e:
                 payload = json.dumps({"ok": False, "error": str(e)}).encode("utf-8")
             self.send_response(200)

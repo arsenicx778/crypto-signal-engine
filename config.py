@@ -9,16 +9,18 @@ VARIANT_CONFIG = {
 
 # ── Live engine parameters (set after backtest analysis) ──────────────────────
 LIVE_TIME_STOP_MODE              = "B_PROFIT_ONLY"
-LIVE_ATR_TP_MULTIPLIER           = 1.0
-LIVE_ATR_SL_MULTIPLIER           = 0.83
+LIVE_ATR_TP_MULTIPLIER           = 2.0
+LIVE_ATR_SL_MULTIPLIER           = 1.5
 LIVE_ADX_MIN                     = 18
 LIVE_ADX_MAX                     = 50
 LIVE_REQUIRE_CANDLE_CONFIRMATION = True
 
 # ── ATR-based stop and target ─────────────────────────────────────────────────
-ATR_MULTIPLIER_STOP  = 0.83
-ATR_MULTIPLIER_TP    = 1.0
-REWARD_RISK_RATIO    = 1.2
+# SL = 1.5×ATR pushes stops outside single-bar noise (was 0.83×).
+# TP = 2.0×ATR gives R:R = 1.33, requiring 43% WR to break even.
+ATR_MULTIPLIER_STOP  = 1.5
+ATR_MULTIPLIER_TP    = 2.0
+REWARD_RISK_RATIO    = 1.33
 
 # ── Risk per trade ────────────────────────────────────────────────────────────
 RISK_PERCENT    = 0.015
@@ -30,40 +32,32 @@ LONG_ADX_MAX          = 50
 SHORT_ADX_MIN         = 18
 SHORT_ADX_MAX         = 50
 MIN_DI_GAP            = 8
-CONFIDENCE_THRESHOLD  = 62
+CONFIDENCE_THRESHOLD  = 65
 SCALP_RSI_LONG_MAX    = 65
 SCALP_RSI_SHORT_MIN   = 35
-MIN_BB_WIDTH          = 0.003
+MIN_BB_WIDTH          = 0.008
 MIN_MACD_MOMENTUM     = 0.05
 
 # ── Per-coin live config from variant testing ─────────────────────────────────
 PER_COIN_LIVE_CONFIG: dict = {
     "ETH": {
-        "ATR_TP_MULTIPLIER":           1.0,
-        "ATR_SL_MULTIPLIER":           1.0,
-        "ADX_MIN":                     20,
-        "ADX_MAX":                     45,
+        "ATR_SL_MULTIPLIER":           1.5,
+        "ATR_TP_MULTIPLIER":           2.0,
         "REQUIRE_CANDLE_CONFIRMATION": True,
     },
     "SOL": {
-        "ATR_TP_MULTIPLIER":           1.2,
-        "ATR_SL_MULTIPLIER":           0.83,
-        "ADX_MIN":                     18,
-        "ADX_MAX":                     50,
+        "ATR_SL_MULTIPLIER":           1.5,
+        "ATR_TP_MULTIPLIER":           2.0,
         "REQUIRE_CANDLE_CONFIRMATION": True,
     },
     "XRP": {
-        "ATR_TP_MULTIPLIER":           1.2,
-        "ATR_SL_MULTIPLIER":           0.83,
-        "ADX_MIN":                     20,
-        "ADX_MAX":                     45,
+        "ATR_SL_MULTIPLIER":           1.5,
+        "ATR_TP_MULTIPLIER":           2.0,
         "REQUIRE_CANDLE_CONFIRMATION": True,
     },
     "LINK": {
-        "ATR_TP_MULTIPLIER":           1.0,
-        "ATR_SL_MULTIPLIER":           1.0,
-        "ADX_MIN":                     25,
-        "ADX_MAX":                     55,
+        "ATR_SL_MULTIPLIER":           1.5,
+        "ATR_TP_MULTIPLIER":           2.0,
         "REQUIRE_CANDLE_CONFIRMATION": False,
     },
 }
@@ -78,6 +72,6 @@ ENABLE_SHORTS             = True
 # ── Operational flags ──────────────────────────────────────────────────────────
 LIVE_TRADING_ENABLED        = True
 LIVE_TRADING_PAUSE_REASON   = ""
-SUSPENDED_COINS             = []
-LIVE_LEARNING_ENABLED       = False
+SUSPENDED_COINS             = ["SOL", "LINK", "XRP"]  # suspended during A/B/C/D experiment
+LIVE_LEARNING_ENABLED       = True
 HISTORICAL_LEARNING_ENABLED = True

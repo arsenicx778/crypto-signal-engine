@@ -22,3 +22,15 @@ git add .
 git commit . -m "   "
 git push
  
+
+
+1. Quick health check (one command, instant)
+
+ps aux | grep -E "experiment.runner|dashboard.py" | grep -v grep | grep -v caffeinate
+
+2. Watch live activity in the terminal
+
+tail -f /tmp/experiment.log
+
+
+~/crypto-signal-engine/start_experiment.sh

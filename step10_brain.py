@@ -1,452 +1,360 @@
 import json
-import os
-import re
 import anthropic
 from dotenv import load_dotenv
 from step_learn import format_learning_for_brain
-from config import (
-    ENABLE_SHORTS, PER_COIN_LIVE_CONFIG, ATR_MULTIPLIER_STOP, ATR_MULTIPLIER_TP,
-    SCALP_RSI_LONG_MAX, SCALP_RSI_SHORT_MIN, MIN_DI_GAP, MIN_BB_WIDTH,
-)
+from config import ENABLE_SHORTS, CONFIDENCE_THRESHOLD, ATR_MULTIPLIER_STOP, ATR_MULTIPLIER_TP, PER_COIN_LIVE_CONFIG
+
+# Kept for backward compat — experiment/variant_brain.py reads this
+_COIN_PRICE_NOTES = {
+    "XRP":  "XRP trades at $0.50–$3.00. SL/TP distances are in cents, not dollars.",
+    "ETH":  "ETH trades at $1,000–$5,000. SL/TP distances are typically $5–$50.",
+    "SOL":  "SOL trades at $20–$300. SL/TP distances are typically $0.50–$10.",
+    "LINK": "LINK trades at $5–$30. SL/TP distances are typically $0.10–$1.50.",
+}
 
 load_dotenv()
 client = anthropic.Anthropic()
 
-_LEARN_KEYWORDS = re.compile(
-    r"AVOID|STRONG_AVOID|FAVOR|CAUTION|sentiment threshold|RSI threshold|MACD threshold|"
-    r"DI\+\s*gap|learned|reinforcement|pattern|overbought trap|weak trend|strong momentum",
-    re.IGNORECASE,
-)
-
-# Per-coin price context so the brain sets realistic SL/TP values
-_COIN_PRICE_NOTES = {
-    "XRP": (
-        "IMPORTANT: XRP trades at a very low price (typically $0.50-$3.00). "
-        "Stop loss and take profit distances MUST be in CENTS, not dollars - "
-        "typical SL distance is $0.01-$0.05, typical TP is $0.015-$0.075. "
-        "Never set SL or TP that imply dollar-scale moves for XRP."
-    ),
-    "ETH":  "ETH trades in the $1,000-$5,000 range. SL/TP distances are typically $5-$50.",
-    "SOL":  "SOL trades in the $20-$300 range. SL/TP distances are typically $0.50-$10.",
-    "LINK": "LINK trades in the $5-$30 range. SL/TP distances are typically $0.10-$1.50.",
-}
-
-
-def _dne_result(reason: str, coin_name: str) -> dict:
-    """Return a well-formed DNE result without calling Sonnet."""
-    return {
-        "success": True,
-        "data": {
-            "signal":      "Do Not Enter",
-            "confidence":  0,
-            "entry_price": None,
-            "stop_loss":   None,
-            "take_profit": None,
-            "reasoning": {
-                "ta_summary":         reason,
-                "sentiment_summary":  "n/a - pre-gate skip",
-                "history_summary":    "n/a - pre-gate skip",
-                "decision_rationale": reason,
-            },
-        },
-    }
-
-
-def _pre_brain_gate(filtered_indicators: dict, coin_name: str) -> str | None:
-    """
-    Cheap indicator-only checks that guarantee DNE without Sonnet.
-    Returns a skip reason string if Sonnet should be skipped, else None.
-    Keys in filtered_indicators are lowercase (from step6_filter).
-    """
-    ind = filtered_indicators or {}
-
-    di_plus  = ind.get("di_plus")  or ind.get("DI_PLUS")
-    di_minus = ind.get("di_minus") or ind.get("DI_MINUS")
-    rsi      = ind.get("rsi")      or ind.get("RSI")
-    bb_width = ind.get("bb_width") or ind.get("BB_WIDTH")
-
-    # Rule 1: DI- > DI+ -> no Buy is possible; with shorts disabled no signal is possible
-    if di_plus is not None and di_minus is not None:
-        if float(di_minus) > float(di_plus) and not ENABLE_SHORTS:
-            return f"DI- {di_minus} > DI+ {di_plus} permanent rule (shorts disabled) -> DNE"
-
-    # Rule 2: RSI < 35 -> no Sell possible; if shorts disabled this only matters when
-    # DI- > DI+ already fires above, but catch the short-enabled edge case too
-    if rsi is not None and ENABLE_SHORTS:
-        if float(rsi) < 35 and di_minus is not None and di_plus is not None:
-            if float(di_minus) > float(di_plus):
-                return f"RSI {rsi} < 35 + DI- > DI+ -> only valid signal would violate both permanent rules -> DNE"
-
-    # Rule 3: BB_WIDTH squeeze - both Buy and Sell blocked
-    if bb_width is not None and float(bb_width) < 0.015:
-        return f"BB_WIDTH {bb_width} < 0.015 (squeeze) -> DNE"
-
-    # Rule 4: STRONG_AVOID pattern with assumed max confidence of 85 would still drop below 60
-    # Only fire this if confidence after 25pt penalty cannot reach 60 (i.e. pattern always blocks).
-    # We assume brain would output at most ~85% confidence; 85 - 25 = 60, so this triggers
-    # when the pattern exists AND raw_count >= 5 (penalty not halved by staleness).
-    lpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         f"{coin_name.lower()}_learning.json")
-    if os.path.exists(lpath):
-        try:
-            with open(lpath) as f:
-                content = f.read().strip()
-            if content:
-                ldata = json.loads(content)
-                wp = ldata.get("weighted_patterns", [])
-                if wp:
-                    # Build normalised indicator dict with uppercase keys for _classify_pattern_key
-                    norm = {}
-                    for k, v in ind.items():
-                        norm[k.upper().replace("+", "_PLUS").replace("-", "_MINUS")] = v
-                    # Also handle DI_PLUS / DI_MINUS aliases
-                    if "DI_PLUS" not in norm and "DI+" in norm:
-                        norm["DI_PLUS"] = norm["DI+"]
-                    if "DI_MINUS" not in norm and "DI-" in norm:
-                        norm["DI_MINUS"] = norm["DI-"]
-
-                    for direction in (["LONG"] if not ENABLE_SHORTS else ["LONG", "SHORT"]):
-                        rsi_v    = norm.get("RSI")
-                        dip_v    = norm.get("DI_PLUS")
-                        dim_v    = norm.get("DI_MINUS")
-                        adx_v    = norm.get("ADX")
-                        macd_v   = norm.get("MACD")
-                        if None in (rsi_v, dip_v, dim_v, adx_v, macd_v):
-                            continue
-                        rsi_f, dip_f, dim_f, adx_f, macd_f = (
-                            float(rsi_v), float(dip_v), float(dim_v),
-                            float(adx_v), float(macd_v)
-                        )
-                        # Skip directions that violate permanent rules - Sonnet would output DNE anyway
-                        if direction == "LONG" and dim_f > dip_f:
-                            continue
-                        if direction == "SHORT" and rsi_f < 35:
-                            continue
-
-                        rsi_tag  = "rsi_low" if rsi_f < 40 else ("rsi_high" if rsi_f > 65 else "rsi_mid")
-                        gap_tag  = "gap_strong" if abs(dip_f - dim_f) >= 15 else "gap_weak"
-                        adx_tag  = "adx_strong" if adx_f >= 27 else "adx_weak"
-                        macd_tag = "macd_pos" if macd_f >= 0 else "macd_neg"
-                        key = f"{direction}|{rsi_tag}|{gap_tag}|{adx_tag}|{macd_tag}"
-
-                        matched = next((p for p in wp if p.get("key") == key), None)
-                        if matched and matched.get("penalty_tag") == "STRONG_AVOID":
-                            raw_count = matched.get("raw_count", 0)
-                            penalty = 25 if raw_count >= 5 else 12.5
-                            # Worst-case: brain outputs 84% confidence (just under our assumed cap)
-                            # If even 84 - penalty < 60 then no brain output can survive guardrails
-                            if 84 - penalty < 60:
-                                return (
-                                    f"STRONG_AVOID pattern {key} "
-                                    f"(penalty={penalty:.0f}pts, 84-{penalty:.0f}={84-penalty:.0f} < 60) -> DNE"
-                                )
-        except Exception:
-            pass  # learning file unreadable - don't skip, let Sonnet decide
-
-    # ── Rule 3: RSI bounds ───────────────────────────────────────────────────
-    if rsi is not None:
-        rsi_f = float(rsi)
-        if rsi_f > SCALP_RSI_LONG_MAX and not ENABLE_SHORTS:
-            return (
-                f"[GATE:{coin_name}] pre-brain RSI {rsi_f} above {SCALP_RSI_LONG_MAX} "
-                f"ceiling with shorts disabled — DNE"
-            )
-        # If RSI is above long ceiling AND below short floor simultaneously — impossible in practice
-        # but guard it: both directions blocked regardless of shorts setting
-        if rsi_f > SCALP_RSI_LONG_MAX and rsi_f < SCALP_RSI_SHORT_MIN:
-            return (
-                f"[GATE:{coin_name}] pre-brain RSI {rsi_f} outside all valid bounds — DNE"
-            )
-
-    # ── Rule 4: DI gap ───────────────────────────────────────────────────────
-    if di_plus is not None and di_minus is not None:
-        gap = abs(float(di_plus) - float(di_minus))
-        if gap < MIN_DI_GAP:
-            return (
-                f"[GATE:{coin_name}] pre-brain DI gap {gap:.1f} below minimum {MIN_DI_GAP} — DNE"
-            )
-
-    # ── Rule 5: ADX window (per-coin) ────────────────────────────────────────
-    adx = ind.get("adx") or ind.get("ADX")
-    if adx is not None:
-        adx_f    = float(adx)
-        coin_cfg = PER_COIN_LIVE_CONFIG.get(coin_name, {})
-        adx_min  = coin_cfg.get("ADX_MIN", 18)
-        adx_max  = coin_cfg.get("ADX_MAX", 50)
-        if adx_f < adx_min:
-            return (
-                f"[GATE:{coin_name}] pre-brain ADX {adx_f} below {adx_min} minimum — DNE"
-            )
-        if adx_f > adx_max:
-            return (
-                f"[GATE:{coin_name}] pre-brain ADX {adx_f} above {adx_max} maximum — DNE"
-            )
-
-    # ── Rule 6: BB width ─────────────────────────────────────────────────────
-    if bb_width is not None:
-        bbw = float(bb_width)
-        if bbw < MIN_BB_WIDTH:
-            return (
-                f"[GATE:{coin_name}] pre-brain BB width {bbw:.4f} below {MIN_BB_WIDTH} minimum — DNE"
-            )
-
-    # ── Rule 7: Candle confirmation — only block when close == prev_close ────
-    coin_cfg = PER_COIN_LIVE_CONFIG.get(coin_name, {})
-    if coin_cfg.get("REQUIRE_CANDLE_CONFIRMATION", False):
-        close      = ind.get("close")      or ind.get("CLOSE")
-        prev_close = ind.get("prev_close") or ind.get("PREV_CLOSE")
-        if close is not None and prev_close is not None:
-            if float(close) == float(prev_close):
-                return (
-                    f"[GATE:{coin_name}] pre-brain candle flat — neither direction confirmed — DNE"
-                )
-
-    # ── Rule 8: HTF trend vs shorts setting ──────────────────────────────────
-    htf_trend = (ind.get("htf_trend") or ind.get("HTF_TREND") or "").strip().upper()
-    if htf_trend == "BEARISH" and not ENABLE_SHORTS:
-        return (
-            f"[GATE:{coin_name}] pre-brain HTF BEARISH with shorts disabled — no valid direction — DNE"
-        )
-
-    return None  # no skip condition met
-
 
 def format_momentum_context(ctx: dict) -> str:
     lines = []
-    lines.append(f"RSI direction: {ctx['rsi_6']} (6 candles) / {ctx['rsi_15']} (15 candles)")
-    lines.append(f"ADX direction: {ctx['adx_6']} (6 candles) — momentum {ctx['macd_hist_accel']}")
-    lines.append(f"DI status: {ctx['di_trend']}")
+    lines.append(f"RSI direction:  {ctx['rsi_6']} (6 candles) / {ctx['rsi_15']} (15 candles)")
+    lines.append(f"ADX direction:  {ctx['adx_6']} (6 candles) — MACD histogram {ctx['macd_hist_accel']}")
+    lines.append(f"DI status:      {ctx['di_trend']}")
     if ctx.get("di_crossover"):
-        lines.append(f"Crossover alert: {ctx['di_crossover']}")
-    lines.append(f"Session position: {ctx['price_vs_session']} ({ctx['session_position_pct']}% of session range)")
-    lines.append(f"Session range: ${ctx['session_low']} to ${ctx['session_high']}")
-    lines.append(f"Volume: {ctx['volume_context']}")
+        lines.append(f"Crossover:      {ctx['di_crossover']}")
+    lines.append(f"Session pos:    {ctx['price_vs_session']} ({ctx['session_position_pct']}% of session range)")
+    lines.append(f"Session range:  ${ctx['session_low']} – ${ctx['session_high']}")
+    lines.append(f"Volume:         {ctx['volume_context']}")
     return "\n".join(lines)
 
 
-def generate_signal(filtered_indicators, sentiment, history_summary, capital, risk_amount, reward_amount=None, coin_name="ETH", coin_symbol="XETHZUSD"):
+def build_prompts(
+    all_indicators: dict,
+    sentiment: dict,
+    raw_history: list,
+    capital: float,
+    risk_amount: float,
+    reward_amount: float,
+    pre_sizing: dict,
+    coin_name: str = "ETH",
+    coin_symbol: str = "XETHZUSD",
+    advisor_note: str = None,
+    learning_override: str = None,
+) -> tuple[str, str]:
+    """
+    Build (system_prompt, user_message) for the brain.
+    Shared by Sonnet (variants A, C) and GPT (variant B) so the experiment
+    isolates the model swap from any prompt drift.
+    """
+    mom_ctx = all_indicators.get("momentum_context")
+    mom_section = ""
+    if mom_ctx and isinstance(mom_ctx, dict):
+        mom_section = format_momentum_context(mom_ctx)
+        print(f"[BRAIN:{coin_name}] momentum: RSI {mom_ctx.get('rsi_6')}/{mom_ctx.get('rsi_15')} "
+              f"| MACD {mom_ctx.get('macd_hist_accel')} | pos {mom_ctx.get('price_vs_session')}")
+
+    indicators_text = "\n".join(
+        f"  {k}: {v}"
+        for k, v in all_indicators.items()
+        if k != "momentum_context"
+    )
+
+    learning_context = (
+        learning_override if learning_override is not None
+        else format_learning_for_brain(coin_name)
+    )
     try:
-        # Extract and format momentum context before building indicators_text
-        _mom_ctx = filtered_indicators.get("momentum_context")
-        _mom_section = ""
-        if _mom_ctx and isinstance(_mom_ctx, dict):
-            _mom_section = f"\nShort-term momentum context (last 4 hours):\n{format_momentum_context(_mom_ctx)}\n"
-            print(f"[BRAIN:{coin_name}] momentum context injected: RSI {_mom_ctx.get('rsi_6')}/{_mom_ctx.get('rsi_15')} | "
-                  f"MACD {_mom_ctx.get('macd_hist_accel')} | pos {_mom_ctx.get('price_vs_session')}")
+        import os, json as _j
+        _lp   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             f"{coin_name.lower()}_learning.json")
+        _ld   = _j.load(open(_lp)) if os.path.exists(_lp) else {}
+        _wp   = _ld.get("weighted_patterns", [])
+        _psum = ", ".join(f"{p['key']}({p['win_rate_pct']:.0f}%)" for p in _wp[:4]) if _wp else "none"
+        print(f"[BRAIN:{coin_name}] patterns loaded: {len(_wp)} | top: {_psum}")
+    except Exception:
+        print(f"[BRAIN:{coin_name}] patterns loaded: 0")
 
-        indicators_text = "\n".join(
-            f"  {k}: {v}" for k, v in filtered_indicators.items() if k != "momentum_context"
+    history_lines = []
+    for r in (raw_history or []):
+        sig = r.get("signal", "")
+        if sig not in ("Buy", "Sell"):
+            continue
+        direction = "LONG" if sig == "Buy" else "SHORT"
+        outcome   = r.get("outcome", "pending")
+        if outcome not in ("W", "L"):
+            continue
+        conf = r.get("confidence", "?")
+        ts   = str(r.get("timestamp", ""))[:10]
+        ind_str = r.get("indicators", "")
+        parsed  = {}
+        for part in str(ind_str).split("|"):
+            if ":" in part:
+                k, _, v = part.partition(":")
+                try:
+                    parsed[k.strip().upper()] = float(v.strip())
+                except ValueError:
+                    pass
+        def _fmt(key, aliases=()):
+            val = parsed.get(key)
+            for a in aliases:
+                if val is None:
+                    val = parsed.get(a)
+            return f"{val:.1f}" if isinstance(val, float) else "?"
+        rsi_s = _fmt("RSI")
+        adx_s = _fmt("ADX")
+        dip_s = _fmt("DI_PLUS",  ("DI+",))
+        dim_s = _fmt("DI_MINUS", ("DI-",))
+        history_lines.append(
+            f"  {ts} {direction:5} {outcome} conf:{conf} "
+            f"RSI:{rsi_s} ADX:{adx_s} DI+:{dip_s} DI-:{dim_s}"
         )
-        coin_price_note = _COIN_PRICE_NOTES.get(coin_name, "")
-        if reward_amount is None:
-            reward_amount = round(risk_amount * 1.5, 2)
+    history_table = "\n".join(history_lines) if history_lines else "  (no closed trades yet)"
 
-        # ── Pre-brain gate: skip Sonnet when outcome is already determined ────
-        skip_reason = _pre_brain_gate(filtered_indicators, coin_name)
-        if skip_reason:
-            print(f"[BRAIN:{coin_name}] pre-gate skip - {skip_reason} (0 Sonnet calls)")
-            return _dne_result(skip_reason, coin_name)
+    advisor_block = ""
+    if advisor_note:
+        advisor_block = f"--- ADVISOR PRE-OPINION ---\n{advisor_note}\n\n"
 
-        learning_context = format_learning_for_brain(coin_name)
+    if pre_sizing:
+        sl_mult = pre_sizing.get("sl_mult", 1.5)
+        tp_mult = pre_sizing.get("tp_mult", 2.0)
+        sizing_block = (
+            f"  If Buy:  Entry ~${pre_sizing['entry']:,.4f} | "
+            f"SL ${pre_sizing['long_sl']:,.4f} | TP ${pre_sizing['long_tp']:,.4f}\n"
+            f"  If Sell: Entry ~${pre_sizing['entry']:,.4f} | "
+            f"SL ${pre_sizing['short_sl']:,.4f} | TP ${pre_sizing['short_tp']:,.4f}\n"
+            f"  ATR = {pre_sizing['atr']:.4f} | "
+            f"SL dist = {pre_sizing['sl_dist']:.4f} ({sl_mult}×ATR) | "
+            f"TP dist = {pre_sizing['tp_dist']:.4f} ({tp_mult}×ATR)\n"
+            f"  Reward:Risk = {pre_sizing['rr']:.2f} | "
+            f"Required WR to break even = {pre_sizing['breakeven_wr']:.1f}%"
+        )
+    else:
+        sizing_block = "  (ATR sizing unavailable — use judgment on SL distance)"
 
-        # ── [BRAIN] log: learning patterns loaded ────────────────────────────
-        try:
-            import os, json as _json
-            _lpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                  f"{coin_name.lower()}_learning.json")
-            _ldata = _json.load(open(_lpath)) if os.path.exists(_lpath) else {}
-            _wp = _ldata.get("weighted_patterns", [])
-            _pattern_summary = ", ".join(
-                f"{p['key']}({p['win_rate_pct']:.0f}%)" for p in _wp[:4]
-            ) if _wp else "none"
-            print(f"[BRAIN:{coin_name}] learning patterns loaded: {len(_wp)} | "
-                  f"top patterns: {_pattern_summary}")
-        except Exception:
-            print(f"[BRAIN:{coin_name}] learning patterns loaded: 0 (no file)")
+    outputs_line    = "Two" if not ENABLE_SHORTS else "Three"
+    sell_in_outputs = ", Sell (short)," if ENABLE_SHORTS else ""
+    if not ENABLE_SHORTS:
+        shorts_block = (
+            "SHORTING IS DISABLED. Do NOT output Sell under any circumstances.\n"
+            "Valid outputs: Buy or Do Not Enter only."
+        )
+    else:
+        shorts_block = (
+            "SELL (SHORT) RULES:\n"
+            "Enter Sell when ALL of these are true:\n"
+            "1. DI- > DI+ (confirmed downtrend)\n"
+            "2. RSI between 40 and 65 (not oversold — oversold move is exhausted)\n"
+            "3. MACD negative or turning negative\n"
+            "4. Confidence ≥ 65%\n"
+            "5. BB_WIDTH > 0.008 (enough volatility)\n"
+            "\n"
+            "Never enter Sell when:\n"
+            "- RSI < 35 (already oversold)\n"
+            "- DI+ > DI- (uptrend)\n"
+            "- Sentiment score > +0.5 (strong positive news can reverse downtrend)"
+        )
 
-        outputs_line = "Two" if not ENABLE_SHORTS else "Three"
-        sell_in_outputs = ", Sell (short)," if ENABLE_SHORTS else ""
-        if not ENABLE_SHORTS:
-            shorts_block = (
-                "SHORTING IS DISABLED. Do NOT output a Sell signal under any circumstances.\n"
-                "Valid outputs: Buy or Do Not Enter only. Never output Sell."
-            )
-        else:
-            shorts_block = (
-                "SELL SIGNAL RULES:\n"
-                "A Sell signal means you are shorting the asset - profiting when price goes DOWN.\n"
-                "\n"
-                "Enter a Sell signal when ALL of these are true:\n"
-                "1. DI- is greater than DI+ (confirmed downtrend)\n"
-                "2. RSI is between 40 and 65 (not oversold - oversold means the move may already be exhausted)\n"
-                "3. MACD is negative or turning negative\n"
-                "4. Confidence is 60% or above\n"
-                "5. BB_WIDTH is above 0.015 (enough volatility to move)\n"
-                "\n"
-                "Never enter Sell when:\n"
-                "- RSI is below 35 (already oversold, move exhausted)\n"
-                "- DI+ is greater than DI- (uptrend, wrong direction)\n"
-                "- Sentiment is above +0.5 (strong positive news could reverse the downtrend)\n"
-                "\n"
-                "For Sell signals calculate SL and TP in reverse:\n"
-                "- Stop Loss is ABOVE entry price (price goes up = loss)\n"
-                "- Take Profit is BELOW entry price (price goes down = win)\n"
-                "- Same 1.5:1 reward:risk ratio applies\n"
-                "- SL distance = ATR x 1.5\n"
-                "- TP distance = SL distance x 1.5 (below entry)"
-            )
-
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=800,
-            system=f"""You are analyzing {coin_name} ({coin_symbol}) for a scalping signal. Adjust your analysis for this specific asset. XRP prices are in cents range. ETH SOL LINK prices are in dollars range.
-
-You are a {coin_name} SCALPING signal engine.
+    system_prompt = f"""You are a {coin_name} scalping signal engine on 3-minute candles.
 
 STRATEGY:
-- This is a scalping strategy targeting 0.3 to 0.8 percent moves.
-- Trades should resolve within 30 to 90 minutes based on tight ATR-based stops and targets.
-- Only enter when momentum is clearly established in the current candle sequence.
-- Prefer entries where MACD histogram is accelerating.
-- Prefer entries where DI gap is widening.
-- Do not enter when indicators are mixed or when the last candle shows reversal.
-- Be conservative with confidence scores. The 62 to 68 percent range is appropriate for most valid setups.
-- Only go above 70 percent when all indicators strongly align.
-- Risk per trade is 1.5% of current coin capital. Reward target is 1.8% of current coin capital (1.2:1 reward:risk).
-- Position size is calculated as: risk_amount / SL_distance.
+- Scalping: targeting 0.3–0.8% directional moves, resolving within 45–90 minutes.
+- Enter only when momentum is clearly established in the current candle sequence.
+- Prefer entries: MACD histogram accelerating, DI gap widening.
+- Favour longs in lower/mid session range, shorts in upper/mid session range.
+- A DI crossover within the last 5 candles is a strong early-trend signal.
 
 RULES:
-- {outputs_line} possible outputs: Buy (long){sell_in_outputs} or Do Not Enter
-- If confidence is below 62% output Do Not Enter regardless of other factors
-- Stop loss and take profit MUST reflect scalping targets (0.3-0.8% moves)
-- Take profit must be at least 1.2x the stop loss distance
-- Cite specific indicator values in your reasoning
-- Never hedge — commit to a clear decision
-- When RSI is below 35 (oversold), only enter Buy if sentiment score is above +0.4
-- DI+ above DI- confirms uptrend. DI- above DI+ confirms downtrend. Never enter a Buy signal when DI- is greater than DI+ regardless of what other indicators show.
+- {outputs_line} valid outputs: Buy (long){sell_in_outputs} or Do Not Enter.
+- Output Do Not Enter when confidence is below {CONFIDENCE_THRESHOLD}%.
+- Confidence guidance: {CONFIDENCE_THRESHOLD}–70% for most valid setups; above 70% only when all indicators strongly align. Be conservative.
+- Cite specific indicator values in your reasoning.
+- Never hedge — one clear decision.
 
 INDICATOR GUIDANCE:
-- ADX measures trend STRENGTH only — it is non-directional. Do NOT use ADX alone as bullish confirmation.
-- Use DI+ vs DI- for directional bias; DI+ > DI- = bullish trend, DI- > DI+ = bearish
-- BB_WIDTH measures Bollinger Band squeeze/expansion: BB_WIDTH > 0.02 indicates meaningful price movement
-- BB_WIDTH expanding = volatility increasing, good for momentum entries
-- BB_WIDTH < 0.003 = squeeze / low volatility = avoid
-- MACD histogram acceleration (increasing absolute value) is a stronger signal than MACD level alone
-- Momentum direction matters more than absolute indicator values for scalping. Prefer entries where RSI is rising over the last 6 candles, MACD histogram is accelerating, and price is in the lower or middle third of the session range for longs, or upper or middle third for shorts. A DI crossover within the last 5 candles is a strong signal of early trend establishment.
+- ADX measures trend STRENGTH only — it is non-directional. Do NOT use ADX as bullish/bearish evidence.
+- DI+ > DI- = uptrend (Buy territory). DI- > DI+ = downtrend (Sell territory).
+- BB_WIDTH > 0.015 = meaningful volatility. BB_WIDTH < 0.008 = squeeze, avoid.
+- MACD histogram acceleration (increasing absolute value) is stronger than MACD level alone.
+- Session position: prefer longs in lower/middle third, shorts in upper/middle third.
 
-PRICE SCALE FOR {coin_name}:
-{coin_price_note}
+PERMANENT RULES:
+1. Never Buy when DI- > DI+
+2. Never Sell when RSI < 35
+
 {shorts_block}
+
+STOP LOSS / TAKE PROFIT:
+The system pre-computes SL and TP from ATR — you do NOT set them.
+Your job is to decide direction and confidence only.
+Do NOT include entry_price, stop_loss, or take_profit in your output.
 
 Output ONLY valid JSON with no other text:
 {{
   "signal": "Buy" or "Sell" or "Do Not Enter",
   "confidence": 0-100,
-  "entry_price": float or null,
-  "stop_loss": float or null,
-  "take_profit": float or null,
   "reasoning": {{
-    "ta_summary": "one sentence on what indicators show",
-    "sentiment_summary": "one sentence on news sentiment",
-    "history_summary": "one sentence on recent W/L pattern",
-    "decision_rationale": "one sentence tying it together"
+    "ta_summary":         "one sentence on what the indicators show",
+    "sentiment_summary":  "one sentence on news sentiment",
+    "history_summary":    "one sentence on the recent W/L pattern",
+    "decision_rationale": "one sentence tying it all together"
   }}
-}}""",
-            messages=[{
-                "role": "user",
-                "content": f"""{coin_name} DAY TRADING SIGNAL REQUEST
+}}"""
 
-Selected indicators:
+    user_message = f"""{coin_name} SCALPING SIGNAL REQUEST
+
+--- INDICATORS (all computed) ---
 {indicators_text}
-{_mom_section}
-News sentiment:  {sentiment.get('news_score', 0.0):+.2f} (range -1.0 to +1.0)
-Headlines seen:  {sentiment.get('headline_count', 0)}
 
-Recent W/L pattern: {history_summary}
+--- SHORT-TERM MOMENTUM (last 4 hours of 3-min bars) ---
+{mom_section if mom_section else "(not available)"}
 
-{learning_context if learning_context else "(No reinforcement learning data yet - insufficient trade history)"}
+--- TRADE GEOMETRY (system pre-computed — do not override) ---
+{sizing_block}
 
-PERMANENT RULES (these override all learnings):
-1. Never generate a Buy signal when DI- > DI+
-2. Never generate a Sell signal when RSI < 35
+--- NEWS SENTIMENT ---
+Score:     {sentiment.get('news_score', 0.0):+.2f}  (range -1.0 to +1.0)
+Headlines: {sentiment.get('headline_count', 0)}
 
-Account context:
-Current capital: ${capital:,.2f}
-Risk this trade: ${risk_amount:.2f} (2% of capital)
-Reward target:   ${reward_amount:.2f} (3% of capital, 1.5:1 ratio)
+--- RECENT CLOSED TRADES (last {len(history_lines)}) ---
+{history_table}
 
-Target: aggressive day trade (0.5-2% move)
-Set stop loss so max loss = ${risk_amount:.2f}
-Set take profit so max gain = ${reward_amount:.2f} (1.5x stop loss distance)
-Position size = risk_amount / SL_distance
+--- REINFORCEMENT LEARNINGS ---
+{learning_context if learning_context else "(no learning data yet — insufficient trade history)"}
 
-Generate day trading signal now."""
-            }]
+--- ACCOUNT CONTEXT ---
+Capital:      ${capital:,.2f}
+Risk/trade:   ${risk_amount:.2f}  (1.5% of capital)
+Reward target:${reward_amount:.2f}  (2.0% of capital, {pre_sizing['rr'] if pre_sizing else 1.33:.2f}:1)
+
+PERMANENT RULES:
+1. Never Buy when DI- > DI+
+2. Never Sell when RSI < 35
+
+{advisor_block}Generate scalping signal now."""
+
+    return system_prompt, user_message
+
+
+def parse_brain_response(raw: str, coin_name: str = "ETH") -> dict:
+    """
+    Parse raw JSON text from the brain (Sonnet or GPT), strip any SL/TP
+    fields, and apply the post-parse short block. Returns the same shape
+    as generate_signal() — {success, data: {...}}.
+    """
+    raw = (raw or "").strip()
+    clean = raw.removeprefix("```json").removesuffix("```").strip()
+    result = json.loads(clean)
+
+    for field in ("entry_price", "stop_loss", "take_profit"):
+        result.pop(field, None)
+
+    raw_conf = result.get("confidence", 0)
+    rationale = result.get("reasoning", {}).get("decision_rationale", "")
+    print(f"[BRAIN:{coin_name}] signal={result.get('signal')} conf={raw_conf}% | {rationale[:80]}")
+
+    if result.get("signal") == "Sell" and not ENABLE_SHORTS:
+        print(f"[BRAIN:{coin_name}] POST-PARSE SHORT BLOCK — overriding Sell → DNE")
+        result["signal"] = "Do Not Enter"
+        result.setdefault("reasoning", {})["decision_rationale"] = (
+            result["reasoning"].get("decision_rationale", "") +
+            " [OVERRIDDEN: ENABLE_SHORTS=False]"
         )
 
-        raw   = response.content[0].text.strip()
-        clean = raw.removeprefix("```json").removesuffix("```").strip()
-        result = json.loads(clean)
+    return {"success": True, "data": result}
 
-        # ── [BRAIN] log: raw confidence + rationale citation scan ────────────
-        raw_conf = result.get("confidence", 0)
-        rationale = result.get("reasoning", {}).get("decision_rationale", "")
-        ta_summary = result.get("reasoning", {}).get("ta_summary", "")
-        full_text = rationale + " " + ta_summary
-        cited_keywords = _LEARN_KEYWORDS.findall(full_text)
-        cited_str = ", ".join(dict.fromkeys(cited_keywords)) if cited_keywords else "none"
-        print(f"[BRAIN:{coin_name}] raw confidence {raw_conf}% | signal: {result.get('signal')} | "
-              f"rationale cited: {cited_str}")
 
-        # ── POST-PARSE SHORT BLOCK: second line of defence ────────────────────
-        if result.get("signal") == "Sell" and not ENABLE_SHORTS:
-            print(f"[BRAIN:{coin_name}] POST-PARSE SHORT BLOCK — Sonnet returned Sell despite disable flag — overriding to DNE")
-            result["signal"] = "Do Not Enter"
-            result["entry_price"] = None
-            result["stop_loss"] = None
-            result["take_profit"] = None
-            if "reasoning" in result:
-                result["reasoning"]["decision_rationale"] = (
-                    result["reasoning"].get("decision_rationale", "") +
-                    " [OVERRIDDEN: POST-PARSE SHORT BLOCK — ENABLE_SHORTS=False]"
-                )
+def _brain_error_response(err: Exception) -> dict:
+    return {
+        "success": False,
+        "error":   str(err),
+        "data": {
+            "signal":     "Do Not Enter",
+            "confidence": 0,
+            "reasoning": {
+                "ta_summary":         "error",
+                "sentiment_summary":  "error",
+                "history_summary":    "error",
+                "decision_rationale": f"Brain failed: {err}",
+            },
+        },
+    }
 
-        return {"success": True, "data": result}
+
+def generate_signal(
+    all_indicators: dict,
+    sentiment: dict,
+    raw_history: list,
+    capital: float,
+    risk_amount: float,
+    reward_amount: float,
+    pre_sizing: dict,
+    coin_name: str = "ETH",
+    coin_symbol: str = "XETHZUSD",
+    advisor_note: str = None,
+    learning_override: str = None,
+) -> dict:
+    """
+    Generate a Buy / Sell / Do Not Enter signal using Sonnet.
+    """
+    try:
+        system_prompt, user_message = build_prompts(
+            all_indicators    = all_indicators,
+            sentiment         = sentiment,
+            raw_history       = raw_history,
+            capital           = capital,
+            risk_amount       = risk_amount,
+            reward_amount     = reward_amount,
+            pre_sizing        = pre_sizing,
+            coin_name         = coin_name,
+            coin_symbol       = coin_symbol,
+            advisor_note      = advisor_note,
+            learning_override = learning_override,
+        )
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=600,
+            system=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": user_message}],
+        )
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            cw = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cr = getattr(usage, "cache_read_input_tokens", 0) or 0
+            print(
+                f"[BRAIN:{coin_name}] tokens in={usage.input_tokens} "
+                f"out={usage.output_tokens} cache_write={cw} cache_read={cr}"
+            )
+
+        return parse_brain_response(response.content[0].text, coin_name)
 
     except Exception as e:
         print(f"[ERROR] Brain failed: {e}")
-        return {
-            "success": False,
-            "error":   str(e),
-            "data": {
-                "signal":      "Do Not Enter",
-                "confidence":  0,
-                "entry_price": None,
-                "stop_loss":   None,
-                "take_profit": None,
-                "reasoning": {
-                    "ta_summary":         "error",
-                    "sentiment_summary":  "error",
-                    "history_summary":    "error",
-                    "decision_rationale": f"Brain failed: {e}"
-                }
-            }
-        }
+        return _brain_error_response(e)
 
 
-def apply_atr_stops(signal_result, filtered_indicators, coin_name="ETH"):
+# ── Backward-compat shim — used by experiment/runner.py ──────────────────────
+def apply_atr_stops(signal_result: dict, filtered_indicators: dict, coin_name: str = "ETH") -> dict:
     """
-    Override brain-generated SL/TP with ATR-based sizing after a Buy or Sell signal.
-    Uses per-coin ATR_SL_MULTIPLIER and ATR_TP_MULTIPLIER from PER_COIN_LIVE_CONFIG,
-    falling back to global ATR_MULTIPLIER_STOP / ATR_MULTIPLIER_TP.
-    filtered_indicators is the dict from step6 (keys like 'atr', 'ATR', etc.).
+    Legacy function kept so experiment/runner.py does not break.
+    In the new pipeline, sizing is computed before the brain call via
+    compute_atr_sizing() in step9_gate.py. This shim replicates the old
+    post-brain override behaviour for callers that haven't been updated yet.
     """
     signal = signal_result.get("data", {})
     if signal.get("signal") not in ("Buy", "Sell"):
         return signal_result
 
-    # Resolve ATR from filtered_indicators (keys may be lower or upper case)
-    atr = None
+    atr   = None
+    entry = signal.get("entry_price")
     for k, v in (filtered_indicators or {}).items():
         if k.strip().upper() == "ATR":
             try:
@@ -455,44 +363,23 @@ def apply_atr_stops(signal_result, filtered_indicators, coin_name="ETH"):
                 pass
             break
 
-    if not atr:
-        print(f"[ATR_STOPS:{coin_name}] fallback — ATR not found in indicators, using brain SL/TP")
+    if not atr or not entry:
         return signal_result
 
-    entry = signal.get("entry_price")
-    if not entry:
-        return signal_result
     try:
         entry = float(entry)
     except (TypeError, ValueError):
         return signal_result
 
-    # Per-coin multipliers, fall back to global defaults
-    coin_cfg    = PER_COIN_LIVE_CONFIG.get(coin_name, {})
-    sl_mult     = coin_cfg.get("ATR_SL_MULTIPLIER", ATR_MULTIPLIER_STOP)
-    tp_mult     = coin_cfg.get("ATR_TP_MULTIPLIER", ATR_MULTIPLIER_TP)
-
-    stop_distance = round(atr * sl_mult, 4)
-    tp_distance   = round(atr * tp_mult, 4)
-
-    is_long = signal["signal"] == "Buy"
-    if is_long:
-        signal["stop_loss"]   = round(entry - stop_distance, 4)
-        signal["take_profit"] = round(entry + tp_distance, 4)
-    else:
-        signal["stop_loss"]   = round(entry + stop_distance, 4)
-        signal["take_profit"] = round(entry - tp_distance, 4)
-
-    print(f"[ATR_STOPS:{coin_name}] ATR={atr} sl_mult={sl_mult} tp_mult={tp_mult} "
-          f"stop_dist={stop_distance} tp_dist={tp_distance} "
+    coin_cfg   = PER_COIN_LIVE_CONFIG.get(coin_name, {})
+    sl_mult    = coin_cfg.get("ATR_SL_MULTIPLIER", ATR_MULTIPLIER_STOP)
+    tp_mult    = coin_cfg.get("ATR_TP_MULTIPLIER", ATR_MULTIPLIER_TP)
+    sl_dist    = round(atr * sl_mult, 4)
+    tp_dist    = round(atr * tp_mult, 4)
+    is_long    = signal["signal"] == "Buy"
+    signal["stop_loss"]   = round(entry - sl_dist if is_long else entry + sl_dist, 4)
+    signal["take_profit"] = round(entry + tp_dist if is_long else entry - tp_dist, 4)
+    print(f"[ATR_STOPS:{coin_name}] ATR={atr} sl×{sl_mult}={sl_dist} tp×{tp_mult}={tp_dist} "
           f"SL={signal['stop_loss']} TP={signal['take_profit']}")
     signal_result["data"] = signal
     return signal_result
-
-
-if __name__ == "__main__":
-    test_indicators = {"rsi": 42.3, "macd": 15.4, "atr": 180.0, "close": 68500.0}
-    test_sentiment  = {"news_score": 0.4, "headline_count": 15}
-    test_history    = "3 recent wins on bullish MACD crossovers in uptrend"
-    result = generate_signal(test_indicators, test_sentiment, test_history, 1000.0, 20.0, coin_name="ETH")
-    print(json.dumps(result, indent=2))

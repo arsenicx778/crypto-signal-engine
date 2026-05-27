@@ -1,0 +1,8 @@
+[
+  {
+    "timestamp": "2026-05-21 18:37 PT",
+    "trade_count": 40,
+    "overall_win_rate": 45,
+    "summary": "Your win rate of 45% masks a clear pattern: SHORT setups with negative MACD and DI- >40 win 80% of the time (10/10 trades), while LONG entries with high RSI (>60) combined with negative sentiment lose 83% (1/6 trades). The DNE miss rate of 30% is acceptable given the low overall win rate\u2014focus first on filtering trades by the strong-edge conditions identified rather than generating more signals. Implement strict RSI range requirements (55-65 for LONG, 37-45 for SHORT) and avoid high-sentiment contradictions to improve from 45% to 60%+."
+  }
+]

@@ -1,23 +1,5 @@
 [
   {
-    "timestamp": "2026-04-24 08:25 PT",
-    "trade_count": 10,
-    "overall_win_rate": 10,
-    "summary": "ETH trading shows catastrophic 10% win rate driven by three critical failures: (1) LONG entries into overbought RSI conditions (>60), (2) entering with weak ADX (<17) lacking directional conviction, and (3) chasing trades when MACD is already extended (>1.80). The single winning trade occurred at moderate RSI with strong ADX confirmation. SHORT trades are directionally misaligned with persistent positive sentiment. Restrict to LONG-only bias with stricter entry filters: require ADX >= 20, RSI 50-58, MACD < 1.50, and sentiment >= 0.35."
-  },
-  {
-    "timestamp": "2026-04-26 01:01 PT",
-    "trade_count": 13,
-    "overall_win_rate": 15,
-    "summary": "The data reveals a critical sentiment threshold at +0.35; LONG trades below this level fail 100% (0-6), while LONG trades above it win 67% (2-3). Conversely, SHORT entries appear counterproductive in a positive sentiment environment (0-4 wins). The brain should abandon SHORT signals entirely and enforce a strict rule: LONG only when sentiment >= +0.35 AND DI+ > DI- by meaningful margin. The 8% DNE miss rate is appropriately cautious given the 15% overall win rate\u2014conservative signal filtering is warranted."
-  },
-  {
-    "timestamp": "2026-04-26 11:13 PT",
-    "trade_count": 16,
-    "overall_win_rate": 31,
-    "summary": "The 31% overall win rate masks a severe directional bias: LONG trades can reach 60% win rates under specific conditions (high sentiment 0.72+, strong ADX 23.5+, DI+ dominance), while SHORT trades have 0% success and should be eliminated entirely. The DNE signal miss rate of 27.9% appears appropriately cautious rather than over-conservative, as it correctly filters low-conviction setups; focus instead on tightening LONG entry rules around sentiment >= 0.72, ADX >= 23.5, and DI+ gap >= 11 to improve from 31% to target 55%+ win rate."
-  },
-  {
     "timestamp": "2026-04-27 10:42 PT",
     "trade_count": 19,
     "overall_win_rate": 26,
@@ -100,5 +82,41 @@
     "trade_count": 40,
     "overall_win_rate": 33,
     "summary": "The strategy has a severe bias toward LONG entries in overextended trends (ADX > 55), causing consistent losses. SHORT trades show strong edge specifically when trend strength is confirmed (ADX > 40) and momentum is decisively negative (MACD < -3.0) with RSI deeply oversold. The 22.4% DNE miss rate suggests signals are appropriately cautious rather than too conservative\u2014focus instead on filtering LONG entries by rejecting ADX > 55 setups and concentrating on high-conviction SHORT patterns to improve the 33% overall win rate."
+  },
+  {
+    "timestamp": "2026-05-21 18:37 PT",
+    "trade_count": 40,
+    "overall_win_rate": 38,
+    "summary": "The 38% overall win rate masks a critical directional bias: LONG trades with elevated RSI (56+), strong DI+ (>40), and positive MACD achieve ~71% win rates, while the RSI 50-55 zone is a loss trap (14% win rate). SHORT setups require stricter ADX/DI- convergence to match LONG reliability; weaker SHORT signals in this dataset suggest DNE's 15.1% miss rate is appropriately cautious rather than overly conservative. Negative sentiment during LONG entries severely degrades performance (32% win rate), indicating sentiment should act as a guard rail, not an entry driver."
+  },
+  {
+    "timestamp": "2026-05-22 01:09 PT",
+    "trade_count": 40,
+    "overall_win_rate": 38,
+    "summary": "The strategy is suffering from weak ADX entries on LONG trades (37.5% win rate on weak trends) and conflicting sentiment on SHORT trades with high ADX. The strongest edge exists in SHORT trades with extreme ADX (>42) and strong MACD momentum (83% win rate), and in LONG trades with RSI 56-62 paired with strong DI+ and trend confirmation (63% win rate). DNE signal miss rate of 28.2% appears appropriately cautious given the 38% overall win rate\u2014stricter entry filters targeting the high-conviction patterns above will improve signal quality more than relaxing DNE thresholds."
+  },
+  {
+    "timestamp": "2026-05-22 03:48 PT",
+    "trade_count": 40,
+    "overall_win_rate": 38,
+    "summary": "The strategy suffers from entering LONG positions during weak trends (ADX < 25) and conflicting sentiment; eliminating these entries would improve win rate significantly. SHORT trades have a clear edge when ADX is strong (>42) with negative MACD and dominant DI-. The 28.5% DNE miss rate suggests signals are appropriately cautious\u2014the real issue is entry condition selectivity, not signal conservatism."
+  },
+  {
+    "timestamp": "2026-05-22 10:55 PT",
+    "trade_count": 40,
+    "overall_win_rate": 35,
+    "summary": "Your SHORT strategy is significantly stronger (71\u201380% win rate) when ADX confirms trend strength and RSI stays below 43; LONG trades suffer from negative sentiment bias and overbought entries. The DNE signal miss rate of 28% suggests appropriate caution rather than excess conservatism\u2014the real leakage is in LONG trade selection (65% loss rate), indicating you need stricter sentiment or ADX filters before entering long positions. Focus capital allocation toward short setups in strong downtrends (ADX > 40, MACD < -2.0) and reduce LONG frequency or require sentiment > -0.20 as a gate."
+  },
+  {
+    "timestamp": "2026-05-22 13:09 PT",
+    "trade_count": 40,
+    "overall_win_rate": 35,
+    "summary": "The strategy is severely hampered by trading LONG during positive sentiment (14% win rate) and LONG during strong downtrends without tight RSI/DI filters. Shorts have a genuine edge when RSI < 43, DI- > 35, ADX > 40, and MACD < -2.0 (80%+ win rate). DNE miss rate of 27.5% is appropriately cautious given the poor overall win rate (35%); tighten entry conditions first before chasing missed trades. Filter out positive sentiment LONG trades entirely and require ADX confirmation for all directional trades."
+  },
+  {
+    "timestamp": "2026-05-23 18:19 PT",
+    "trade_count": 40,
+    "overall_win_rate": 35,
+    "summary": "The portfolio suffers from directional conviction conflicts: LONG trades into negative sentiment cost -42% versus baseline, while SHORT trades into positive sentiment cost -27%. The SHORT strategy with high ADX (40+), strong DI- dominance (35+), and oversold RSI (under 45) generates 63-80% win rates and should be the primary focus. DNE signals at 27.9% miss rate indicate reasonable caution; the real edge lies in sentiment alignment with direction rather than missing more signals."
   }
 ]

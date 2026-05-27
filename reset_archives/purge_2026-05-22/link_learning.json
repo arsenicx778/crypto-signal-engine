@@ -1,0 +1,180 @@
+{
+  "coin": "LINK",
+  "generated_at": "2026-05-21 18:37 PT",
+  "trade_count": 40,
+  "overall_win_rate": 45,
+  "patterns": [
+    {
+      "condition": "LONG with RSI 55-65 and DI+ > DI- by 15+ points",
+      "wins": 8,
+      "losses": 5,
+      "win_rate": 62,
+      "recommendation": "Prioritize long entries when RSI is 55-65 with strong DI+ dominance; this is your strongest directional setup.",
+      "confidence": "high",
+      "sample_size_note": "13 observations"
+    },
+    {
+      "condition": "SHORT with RSI 37-45 and DI- > DI- by 10+ points and ADX > 25",
+      "wins": 9,
+      "losses": 4,
+      "win_rate": 69,
+      "recommendation": "Short entries with low RSI (37-45), strong DI- dominance, and confirmed trend (ADX >25) show best edge; execute these setups consistently.",
+      "confidence": "high",
+      "sample_size_note": "13 observations"
+    },
+    {
+      "condition": "LONG with RSI > 60 and SENTIMENT negative (-0.15 or below)",
+      "wins": 1,
+      "losses": 5,
+      "win_rate": 17,
+      "recommendation": "Avoid long entries when RSI is elevated (>60) but sentiment is negative; this is a reversal trap pattern.",
+      "confidence": "high",
+      "sample_size_note": "6 observations"
+    },
+    {
+      "condition": "SHORT with SENTIMENT > 0.50 regardless of RSI/DI positioning",
+      "wins": 4,
+      "losses": 6,
+      "win_rate": 40,
+      "recommendation": "High positive sentiment (>0.50) contradicts short bias; either skip shorts or reduce size when SENTIMENT exceeds +0.50.",
+      "confidence": "medium",
+      "sample_size_note": "10 observations"
+    },
+    {
+      "condition": "LONG with ADX < 25 (weak trend)",
+      "wins": 2,
+      "losses": 4,
+      "win_rate": 33,
+      "recommendation": "Require ADX > 25 as confirmation for long trades; weak trend environments (ADX <25) show poor win rates.",
+      "confidence": "medium",
+      "sample_size_note": "6 observations"
+    },
+    {
+      "condition": "SHORT with MACD negative and DI- > 40",
+      "wins": 8,
+      "losses": 2,
+      "win_rate": 80,
+      "recommendation": "Strongest short setup: negative MACD combined with DI- >40 shows dominant edge; prioritize these high-conviction shorts.",
+      "confidence": "high",
+      "sample_size_note": "10 observations"
+    }
+  ],
+  "weighted_patterns": [
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.793,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 0.663,
+      "weighted_losses": 0.574,
+      "raw_count": 3,
+      "weighted_win_rate": 0.5361,
+      "win_rate_pct": 53.6,
+      "confidence_penalty": 5,
+      "penalty_tag": "CAUTION"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.567,
+      "weighted_losses": 1.44,
+      "raw_count": 4,
+      "weighted_win_rate": 0.2824,
+      "win_rate_pct": 28.2,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 0.811,
+      "weighted_losses": 2.319,
+      "raw_count": 7,
+      "weighted_win_rate": 0.2591,
+      "win_rate_pct": 25.9,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.331,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 0.342,
+      "weighted_losses": 0.0,
+      "raw_count": 1,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.392,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.441,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_pos",
+      "weighted_wins": 0.479,
+      "weighted_losses": 0.481,
+      "raw_count": 2,
+      "weighted_win_rate": 0.4987,
+      "win_rate_pct": 49.9,
+      "confidence_penalty": 5,
+      "penalty_tag": "CAUTION"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 1.559,
+      "weighted_losses": 0.668,
+      "raw_count": 4,
+      "weighted_win_rate": 0.7001,
+      "win_rate_pct": 70.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    }
+  ],
+  "strongest_long_setup": "RSI 55-65, DI+ > DI- by 15+ points, ADX >25, positive or neutral MACD, SENTIMENT > -0.15. Avoid when sentiment is negative.",
+  "strongest_short_setup": "RSI 37-45, DI- > DI+ by 10+ points, MACD negative, ADX >25, SENTIMENT < +0.50. MACD + strong DI- dominance (>40) shows 80% win rate on shorts.",
+  "summary": "Your win rate of 45% masks a clear pattern: SHORT setups with negative MACD and DI- >40 win 80% of the time (10/10 trades), while LONG entries with high RSI (>60) combined with negative sentiment lose 83% (1/6 trades). The DNE miss rate of 30% is acceptable given the low overall win rate\u2014focus first on filtering trades by the strong-edge conditions identified rather than generating more signals. Implement strict RSI range requirements (55-65 for LONG, 37-45 for SHORT) and avoid high-sentiment contradictions to improve from 45% to 60%+.",
+  "regime": {
+    "avg_adx": 36.0307,
+    "avg_rsi": 48.1738,
+    "avg_bb_width": null,
+    "n_trades": 20,
+    "captured_at": "2026-05-21T18:37:43.197107-07:00"
+  },
+  "dne_analysis": {
+    "missed_opportunity": 65,
+    "correct_dne": 151,
+    "total_dne": 216,
+    "miss_rate": 0.3009
+  }
+}

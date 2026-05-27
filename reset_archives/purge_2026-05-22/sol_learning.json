@@ -1,0 +1,170 @@
+{
+  "coin": "SOL",
+  "generated_at": "2026-05-21 18:37 PT",
+  "trade_count": 40,
+  "overall_win_rate": 42,
+  "patterns": [
+    {
+      "condition": "LONG with SENTIMENT between +0.12 and +0.17 (neutral-positive)",
+      "wins": 9,
+      "losses": 8,
+      "win_rate": 53,
+      "recommendation": "Maintain neutral sentiment LONG entries as they show slight edge; avoid extreme sentiment readings which correlate with reversals.",
+      "confidence": "medium",
+      "sample_size_note": "17 observations provide reasonable sample"
+    },
+    {
+      "condition": "LONG with ADX > 30 (strong trend confirmation)",
+      "wins": 4,
+      "losses": 8,
+      "win_rate": 33,
+      "recommendation": "Reduce position size or skip LONG entries when ADX exceeds 30; trend strength is paradoxically associated with mean reversion failures.",
+      "confidence": "medium",
+      "sample_size_note": "12 observations"
+    },
+    {
+      "condition": "LONG with RSI 58-63 range and DI+ > DI- by >14 points",
+      "wins": 8,
+      "losses": 4,
+      "win_rate": 67,
+      "recommendation": "Prioritize this as the strongest long setup; RSI mid-range with strong DI+ dominance shows consistent edge.",
+      "confidence": "high",
+      "sample_size_note": "12 observations, clearest pattern in dataset"
+    },
+    {
+      "condition": "LONG with SENTIMENT > +0.50 (high bullish sentiment)",
+      "wins": 1,
+      "losses": 5,
+      "win_rate": 17,
+      "recommendation": "Avoid or heavily reduce LONG entries when sentiment exceeds +0.50; extreme bullish sentiment precedes reversals.",
+      "confidence": "high",
+      "sample_size_note": "6 observations show strong negative correlation"
+    },
+    {
+      "condition": "SHORT with DI- > 35 and RSI < 45 (strong bearish structure)",
+      "wins": 3,
+      "losses": 4,
+      "win_rate": 43,
+      "recommendation": "SHORT trades lack reliable edge; current pattern shows near coin-flip odds despite good directional setup.",
+      "confidence": "low",
+      "sample_size_note": "7 observations insufficient for high confidence"
+    },
+    {
+      "condition": "LONG with MACD positive and RSI < 55 (early momentum + oversold recovery)",
+      "wins": 5,
+      "losses": 2,
+      "win_rate": 71,
+      "recommendation": "This represents strongest secondary setup; prioritize LONG entries with positive MACD when RSI is below 55.",
+      "confidence": "high",
+      "sample_size_note": "7 observations, strong positive correlation"
+    }
+  ],
+  "weighted_patterns": [
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 1.206,
+      "weighted_losses": 1.73,
+      "raw_count": 9,
+      "weighted_win_rate": 0.4108,
+      "win_rate_pct": 41.1,
+      "confidence_penalty": 15,
+      "penalty_tag": "AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 1.037,
+      "weighted_losses": 0.831,
+      "raw_count": 5,
+      "weighted_win_rate": 0.5553,
+      "win_rate_pct": 55.5,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.999,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_pos",
+      "weighted_wins": 0.727,
+      "weighted_losses": 0.0,
+      "raw_count": 2,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_pos",
+      "weighted_wins": 0.443,
+      "weighted_losses": 2.162,
+      "raw_count": 6,
+      "weighted_win_rate": 0.17,
+      "win_rate_pct": 17.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.323,
+      "raw_count": 3,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 1.107,
+      "raw_count": 2,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.483,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.507,
+      "weighted_losses": 0.0,
+      "raw_count": 1,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    }
+  ],
+  "strongest_long_setup": "RSI 58-63 with DI+ exceeding DI- by 14+ points and sentiment neutral (+0.12 to +0.17); achieves 67% win rate. Secondary setup: positive MACD with RSI < 55 shows 71% win rate but fewer occurrences.",
+  "strongest_short_setup": "Insufficient edge detected. SHORT trades show 43% win rate at best. Data suggests SHORT direction is fundamentally weaker for this asset; recommend deprioritizing shorts or requiring significantly higher confidence thresholds.",
+  "summary": "LONG trades dominate profitability when RSI stays in 58-63 range with strong DI+ advantage, but extreme sentiment readings (>+0.50) and high ADX (>30) trigger reversals. HIGH ADX paradoxically correlates with losses despite indicating trend strength, suggesting SOL mean-reverts in strong trends. SHORT trades lack reliable edge across all conditions tested; focus capital on optimized LONG setups with neutral-to-slightly-positive sentiment. DNE signal miss rate of 36.8% indicates signals may be appropriately cautious rather than overly conservative.",
+  "regime": {
+    "avg_adx": 29.7306,
+    "avg_rsi": 55.5921,
+    "avg_bb_width": null,
+    "n_trades": 20,
+    "captured_at": "2026-05-21T18:37:32.167468-07:00"
+  },
+  "dne_analysis": {
+    "missed_opportunity": 103,
+    "correct_dne": 177,
+    "total_dne": 280,
+    "miss_rate": 0.3679
+  }
+}

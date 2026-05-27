@@ -191,6 +191,12 @@ def get_coin_stats(coin, rows_by_coin=None, capital_start=COIN_CAPITAL_START):
     completed = len(wins) + len(losses)
     win_rate = round(len(wins) / completed * 100, 1) if completed > 0 else 0.0
 
+    cutoff_48h = now_pacific() - timedelta(hours=48)
+    closed_48h = _closed_trade_rows(trade_rows, closed_from=cutoff_48h)
+    wins_48h = sum(1 for r in closed_48h if r.get("outcome") == "W")
+    completed_48h = len(closed_48h)
+    win_rate_48h = round(wins_48h / completed_48h * 100, 1) if completed_48h > 0 else None
+
     return {
         "coin": coin,
         "capital": round(capital, 2),
@@ -200,6 +206,8 @@ def get_coin_stats(coin, rows_by_coin=None, capital_start=COIN_CAPITAL_START):
         "longs_open": sum(1 for row in pending if row.get("signal") == "Buy"),
         "shorts_open": sum(1 for row in pending if row.get("signal") == "Sell"),
         "win_rate": win_rate,
+        "win_rate_48h": win_rate_48h,
+        "completed_48h": completed_48h,
         "completed": completed,
         "open_trade": open_trade,
         "open_trades": pending,
@@ -240,9 +248,17 @@ def get_portfolio_stats(rows_by_coin=None):
         elif row.get("outcome") == "W":
             break
 
+    cutoff_48h = now_pacific() - timedelta(hours=48)
+    closed_48h = _closed_trade_rows(signals, closed_from=cutoff_48h)
+    wins_48h = sum(1 for r in closed_48h if r.get("outcome") == "W")
+    completed_48h = len(closed_48h)
+    win_rate_48h = round(wins_48h / completed_48h * 100, 1) if completed_48h > 0 else None
+
     return {
         "capital": total_capital,
         "win_rate": round(wins / completed * 100, 1) if completed > 0 else 0.0,
+        "win_rate_48h": win_rate_48h,
+        "completed_48h": completed_48h,
         "wins": wins,
         "losses": losses,
         "pending_trades": len(pending),

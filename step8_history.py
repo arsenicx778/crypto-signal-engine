@@ -46,25 +46,60 @@ def load_history(n=10, coin_name=None, signals_file=None):
         return []
 
 
-def summarize_history(history):
+def format_history_for_brain(history: list) -> str:
+    """
+    Format the last N closed trades as a compact table for the brain prompt.
+    No LLM call — pure formatting. Returns a plain-text string.
+    """
     if not history:
-        return {"success": True, "data": "No signal history yet — this is the first signal."}
-    try:
-        history_text = "\n".join(
-            f"[{r.get('timestamp','')}] {r.get('signal','')} -> {r.get('outcome','pending')} "
-            f"(confidence: {r.get('confidence','')}%)"
-            for r in history
+        return "(no closed trade history yet)"
+
+    lines = []
+    for r in history:
+        sig = r.get("signal", "")
+        if sig not in ("Buy", "Sell"):
+            continue
+        outcome = r.get("outcome", "pending")
+        if outcome not in ("W", "L"):
+            continue
+        direction = "LONG" if sig == "Buy" else "SHORT"
+        conf = r.get("confidence", "?")
+        ts   = str(r.get("timestamp", ""))[:10]
+
+        # Parse indicator snapshot stored in trade metadata
+        ind_str = r.get("indicators", "")
+        parsed  = {}
+        for part in str(ind_str).split("|"):
+            if ":" in part:
+                k, _, v = part.partition(":")
+                try:
+                    parsed[k.strip().upper()] = float(v.strip())
+                except ValueError:
+                    pass
+
+        def _f(key, *aliases):
+            val = parsed.get(key)
+            for a in aliases:
+                if val is None:
+                    val = parsed.get(a)
+            return f"{val:.1f}" if isinstance(val, float) else "?"
+
+        rsi_s = _f("RSI")
+        adx_s = _f("ADX")
+        dip_s = _f("DI_PLUS",  "DI+")
+        dim_s = _f("DI_MINUS", "DI-")
+        lines.append(
+            f"  {ts} {direction:5} {outcome}  conf:{conf} "
+            f"RSI:{rsi_s} ADX:{adx_s} DI+:{dip_s} DI-:{dim_s}"
         )
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=100,
-            system="""You are a trading pattern analyst.
-Summarize the win/loss pattern from recent signals in ONE sentence.
-Focus on what conditions led to wins vs losses.
-Output plain text only. Maximum 30 words.""",
-            messages=[{"role": "user", "content": f"Recent signal history:\n{history_text}"}]
-        )
-        return {"success": True, "data": response.content[0].text.strip()}
-    except Exception as e:
-        print(f"[WARN] History summarization failed: {e}")
-        return {"success": True, "data": "Could not summarize history."}
+
+    return "\n".join(lines) if lines else "(no closed trade history yet)"
+
+
+def summarize_history(history):
+    """Deprecated — kept for compatibility. Use format_history_for_brain instead."""
+    if not history:
+        return {"success": True, "data": "No signal history yet."}
+    wins   = sum(1 for r in history if r.get("outcome") == "W")
+    losses = sum(1 for r in history if r.get("outcome") == "L")
+    return {"success": True, "data": f"{wins}W {losses}L in last {len(history)} trades."}

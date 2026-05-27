@@ -1,13 +1,160 @@
 {
   "coin": "ETH",
-  "generated_at": "2026-05-04 08:10 UTC",
-  "source": "historical_bootstrap",
-  "candles_analyzed": 721,
-  "trade_count": 41,
-  "overall_win_rate": 73,
-  "patterns": [],
-  "weighted_patterns": [],
-  "strongest_long_setup": "No qualifying LONG pattern found.",
-  "strongest_short_setup": "No qualifying SHORT pattern found.",
-  "summary": "Bootstrap from 721 historical candles. 41 simulated trades, 73% win rate. 0 pattern keys with 20+ occurrences (HIGH confidence), 0 with 10-19 (LOW_CONFIDENCE). Use these as starting priors; live trading will refine them."
+  "generated_at": "2026-05-23 18:19 PT",
+  "trade_count": 40,
+  "overall_win_rate": 35,
+  "patterns": [
+    {
+      "condition": "LONG with RSI 56-62 and DI+ > 35",
+      "wins": 5,
+      "losses": 8,
+      "win_rate": 38,
+      "recommendation": "This setup shows marginal edge; require additional confirmation like ADX > 30 and MACD > 0.5 before entry.",
+      "confidence": "medium",
+      "sample_size_note": null
+    },
+    {
+      "condition": "SHORT with DI- > 35 and RSI 39-43 and ADX > 40",
+      "wins": 5,
+      "losses": 3,
+      "win_rate": 63,
+      "recommendation": "This is the strongest SHORT setup; prioritize trades meeting all three criteria.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "LONG with sentiment <= -0.30 (negative sentiment)",
+      "wins": 5,
+      "losses": 13,
+      "win_rate": 28,
+      "recommendation": "Avoid LONG entries when sentiment is strongly negative; this directional conflict generates 72% losses.",
+      "confidence": "high",
+      "sample_size_note": null
+    },
+    {
+      "condition": "SHORT with positive sentiment (SENT > 0.10)",
+      "wins": 3,
+      "losses": 5,
+      "win_rate": 38,
+      "recommendation": "Avoid SHORT trades when sentiment is positive; sentiment opposes trade direction in 62% of these cases.",
+      "confidence": "medium",
+      "sample_size_note": null
+    },
+    {
+      "condition": "LONG with DI+ > 40 and ADX 25-30 (weak trend confirmation)",
+      "wins": 2,
+      "losses": 4,
+      "win_rate": 33,
+      "recommendation": "Require ADX > 30 or DI+ > 42 for LONG entries; weak ADX undermines directional signal.",
+      "confidence": "medium",
+      "sample_size_note": "6 observations"
+    },
+    {
+      "condition": "SHORT with ADX 45+ and DI- > 35 and RSI < 45",
+      "wins": 4,
+      "losses": 1,
+      "win_rate": 80,
+      "recommendation": "This elite SHORT pattern has exceptional edge; make this a priority scan condition.",
+      "confidence": "high",
+      "sample_size_note": "5 observations"
+    }
+  ],
+  "weighted_patterns": [
+    {
+      "key": "SHORT|rsi_low|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 0.834,
+      "weighted_losses": 0.551,
+      "raw_count": 3,
+      "weighted_win_rate": 0.6024,
+      "win_rate_pct": 60.2,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_strong|adx_strong|macd_neg",
+      "weighted_wins": 1.379,
+      "weighted_losses": 2.644,
+      "raw_count": 8,
+      "weighted_win_rate": 0.3428,
+      "win_rate_pct": 34.3,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_mid|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.418,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_strong|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 3.496,
+      "raw_count": 6,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_weak|macd_neg",
+      "weighted_wins": 0.0,
+      "weighted_losses": 0.431,
+      "raw_count": 1,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    },
+    {
+      "key": "SHORT|rsi_low|gap_weak|adx_strong|macd_neg",
+      "weighted_wins": 0.431,
+      "weighted_losses": 0.0,
+      "raw_count": 1,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_strong|adx_weak|macd_pos",
+      "weighted_wins": 1.363,
+      "weighted_losses": 0.0,
+      "raw_count": 2,
+      "weighted_win_rate": 1.0,
+      "win_rate_pct": 100.0,
+      "confidence_penalty": 0,
+      "penalty_tag": "NEUTRAL"
+    },
+    {
+      "key": "LONG|rsi_mid|gap_weak|adx_strong|macd_pos",
+      "weighted_wins": 0.0,
+      "weighted_losses": 2.198,
+      "raw_count": 3,
+      "weighted_win_rate": 0.0,
+      "win_rate_pct": 0.0,
+      "confidence_penalty": 25,
+      "penalty_tag": "STRONG_AVOID"
+    }
+  ],
+  "strongest_long_setup": "LONG with RSI 58-62, DI+ 38-46, ADX 25-35, MACD > 0.8, and neutral to slightly negative sentiment. Win rate improves when ADX rises above 30 and DI+ exceeds 40.",
+  "strongest_short_setup": "SHORT with ADX 40+, DI- 35+, RSI 39-43, MACD < -2.0, and neutral sentiment. The elite variant (ADX 45+, DI- > 35, RSI < 45) yields 80% win rate across 5 trades.",
+  "summary": "The portfolio suffers from directional conviction conflicts: LONG trades into negative sentiment cost -42% versus baseline, while SHORT trades into positive sentiment cost -27%. The SHORT strategy with high ADX (40+), strong DI- dominance (35+), and oversold RSI (under 45) generates 63-80% win rates and should be the primary focus. DNE signals at 27.9% miss rate indicate reasonable caution; the real edge lies in sentiment alignment with direction rather than missing more signals.",
+  "regime": {
+    "avg_adx": 35.5037,
+    "avg_rsi": 56.1691,
+    "avg_bb_width": null,
+    "n_trades": 20,
+    "captured_at": "2026-05-23T18:19:09.622802-07:00"
+  },
+  "dne_analysis": {
+    "missed_opportunity": 234,
+    "correct_dne": 604,
+    "total_dne": 838,
+    "miss_rate": 0.2792
+  }
 }

@@ -1,7 +1,15 @@
+import os
+import json
 import threading
 from datetime import date
 from trade_store import get_trade_store
-from config import RISK_PERCENT, REWARD_PERCENT
+from config import (
+    RISK_PERCENT, REWARD_PERCENT, ENABLE_SHORTS,
+    SCALP_RSI_LONG_MAX, SCALP_RSI_SHORT_MIN,
+    MIN_DI_GAP, MIN_BB_WIDTH, LONG_ADX_MIN, LONG_ADX_MAX,
+    ATR_MULTIPLIER_STOP, ATR_MULTIPLIER_TP,
+    PER_COIN_LIVE_CONFIG, CONFIDENCE_THRESHOLD,
+)
 
 MAX_DAILY_CALLS  = 8000
 CAPITAL          = 1000.0   # per-coin starting capital
@@ -90,6 +98,150 @@ def _build_display_line():
         s = gate_state[name]
         parts.append(f"{name}: ${s['capital']:,.0f} | L:{s['open_longs']} S:{s['open_shorts']}")
     return " | ".join(parts)
+
+
+def compute_atr_sizing(all_indicators: dict, coin_name: str = "ETH") -> dict | None:
+    """
+    Compute ATR-based SL/TP distances before the brain call.
+    Returns a sizing dict or None if ATR or close price is unavailable.
+    """
+    atr = None
+    close = None
+    for k, v in (all_indicators or {}).items():
+        ku = k.strip().upper()
+        if ku == "ATR":
+            try:
+                atr = float(v)
+            except (TypeError, ValueError):
+                pass
+        elif ku == "CLOSE":
+            try:
+                close = float(v)
+            except (TypeError, ValueError):
+                pass
+
+    if not atr or not close:
+        return None
+
+    coin_cfg = PER_COIN_LIVE_CONFIG.get(coin_name, {})
+    sl_mult  = coin_cfg.get("ATR_SL_MULTIPLIER", ATR_MULTIPLIER_STOP)
+    tp_mult  = coin_cfg.get("ATR_TP_MULTIPLIER", ATR_MULTIPLIER_TP)
+
+    sl_dist = round(atr * sl_mult, 4)
+    tp_dist = round(atr * tp_mult, 4)
+    rr      = round(tp_dist / sl_dist, 3) if sl_dist else 0.0
+    breakeven_wr = round(100.0 / (1.0 + rr), 1) if rr else 50.0
+
+    return {
+        "entry":        round(close, 4),
+        "long_sl":      round(close - sl_dist, 4),
+        "long_tp":      round(close + tp_dist, 4),
+        "short_sl":     round(close + sl_dist, 4),
+        "short_tp":     round(close - tp_dist, 4),
+        "atr":          atr,
+        "sl_dist":      sl_dist,
+        "tp_dist":      tp_dist,
+        "sl_mult":      sl_mult,
+        "tp_mult":      tp_mult,
+        "rr":           rr,
+        "breakeven_wr": breakeven_wr,
+    }
+
+
+def technical_hard_gate(all_indicators: dict, coin_name: str) -> dict:
+    """
+    Deterministic pre-LLM technical filter. Runs before any model calls.
+    Returns {'proceed': bool, 'reason': str}.
+    Checks DI gap, ADX, BB_WIDTH, RSI extremes, candle confirmation,
+    and STRONG_AVOID learning patterns.
+    """
+    ind      = all_indicators or {}
+    rsi      = ind.get("rsi")
+    di_plus  = ind.get("di_plus")
+    di_minus = ind.get("di_minus")
+    adx      = ind.get("adx")
+    bb_width = ind.get("bb_width")
+    close    = ind.get("close")
+    prev_close = ind.get("prev_close")
+    macd     = ind.get("macd")
+
+    # DI gap
+    if di_plus is not None and di_minus is not None:
+        gap = abs(float(di_plus) - float(di_minus))
+        if gap < MIN_DI_GAP:
+            return {"proceed": False, "reason": f"DI gap {gap:.1f} < {MIN_DI_GAP} minimum"}
+
+    # ADX window
+    if adx is not None:
+        adx_f    = float(adx)
+        coin_cfg = PER_COIN_LIVE_CONFIG.get(coin_name, {})
+        adx_min  = coin_cfg.get("ADX_MIN", LONG_ADX_MIN)
+        adx_max  = coin_cfg.get("ADX_MAX", LONG_ADX_MAX)
+        if adx_f < adx_min:
+            return {"proceed": False, "reason": f"ADX {adx_f:.1f} below {adx_min} minimum"}
+        if adx_f > adx_max:
+            return {"proceed": False, "reason": f"ADX {adx_f:.1f} above {adx_max} maximum"}
+
+    # BB width squeeze
+    if bb_width is not None and float(bb_width) < MIN_BB_WIDTH:
+        return {"proceed": False, "reason": f"BB_WIDTH {float(bb_width):.4f} < {MIN_BB_WIDTH} (squeeze)"}
+
+    # RSI + DI: check whether both directions are simultaneously blocked
+    if rsi is not None and di_plus is not None and di_minus is not None:
+        rsi_f = float(rsi)
+        dip   = float(di_plus)
+        dim   = float(di_minus)
+        long_blocked  = (rsi_f > SCALP_RSI_LONG_MAX) or (dim > dip)
+        short_blocked = (rsi_f < SCALP_RSI_SHORT_MIN) or (dip > dim) or (not ENABLE_SHORTS)
+        if long_blocked and short_blocked:
+            return {"proceed": False,
+                    "reason": f"RSI {rsi_f:.1f} and DI state block all valid directions"}
+
+    # Candle confirmation (per-coin opt-in)
+    coin_cfg = PER_COIN_LIVE_CONFIG.get(coin_name, {})
+    if coin_cfg.get("REQUIRE_CANDLE_CONFIRMATION", False):
+        if close is not None and prev_close is not None:
+            if float(close) == float(prev_close):
+                return {"proceed": False, "reason": "flat candle — no directional confirmation"}
+
+    # STRONG_AVOID shortcut: if any pattern's max-possible confidence can't survive
+    # the learning penalty, skip the brain call entirely (saves a Sonnet call)
+    lpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         f"{coin_name.lower()}_learning.json")
+    if (os.path.exists(lpath) and rsi is not None and di_plus is not None
+            and di_minus is not None and adx is not None and macd is not None):
+        try:
+            with open(lpath) as f:
+                ldata = json.loads(f.read().strip() or "{}")
+            wp = ldata.get("weighted_patterns", [])
+            if wp:
+                rsi_f  = float(rsi)
+                dip_f  = float(di_plus)
+                dim_f  = float(di_minus)
+                adx_f  = float(adx)
+                macd_f = float(macd)
+                dirs   = ["LONG"] if not ENABLE_SHORTS else ["LONG", "SHORT"]
+                for direction in dirs:
+                    if direction == "LONG"  and dim_f > dip_f: continue
+                    if direction == "SHORT" and rsi_f < 35:    continue
+                    rsi_tag  = "rsi_low"  if rsi_f < 40 else ("rsi_high" if rsi_f > 65 else "rsi_mid")
+                    gap_tag  = "gap_strong" if abs(dip_f - dim_f) >= 15 else "gap_weak"
+                    adx_tag  = "adx_strong" if adx_f >= 27 else "adx_weak"
+                    macd_tag = "macd_pos"   if macd_f >= 0  else "macd_neg"
+                    key      = f"{direction}|{rsi_tag}|{gap_tag}|{adx_tag}|{macd_tag}"
+                    matched  = next((p for p in wp if p.get("key") == key), None)
+                    if matched and matched.get("penalty_tag") == "STRONG_AVOID":
+                        raw_count = matched.get("raw_count", 0)
+                        penalty   = 25 if raw_count >= 5 else 12.5
+                        # 84 is the practical brain confidence ceiling
+                        if 84 - penalty < CONFIDENCE_THRESHOLD:
+                            return {"proceed": False,
+                                    "reason": f"STRONG_AVOID pattern {key} — max adjusted conf "
+                                              f"{84-penalty:.0f} < {CONFIDENCE_THRESHOLD} threshold"}
+        except Exception:
+            pass  # unreadable learning file — let the brain decide
+
+    return {"proceed": True, "reason": "All technical checks passed"}
 
 
 def is_fully_blocked(coin_name):
